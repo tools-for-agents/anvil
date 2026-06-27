@@ -1,0 +1,10 @@
+{
+  "name": "anvil-agent",
+  "version": "0.1.0",
+  "description": "Throwaway Docker sandbox for agents: run code/commands in resource-limited, network-isolated containers and get structured results. Zero dependencies.",
+  "type": "module",
+  "bin": { "anvil": "src/cli.js" },
+  "engines": { "node": ">=22" },
+  "scripts": { "mcp": "node mcp/mcp-server.js" },
+  "license": "MIT"
+}
