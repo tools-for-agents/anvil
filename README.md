@@ -1,5 +1,7 @@
 # 🔨 anvil
 
+[![ci](https://github.com/tools-for-agents/anvil/actions/workflows/ci.yml/badge.svg)](https://github.com/tools-for-agents/anvil/actions/workflows/ci.yml)
+
 **A throwaway Docker sandbox for agents.**
 
 Run code or shell commands in a **resource-limited, network-isolated, single-use container** and get back a structured result — `stdout`, `stderr`, `exit_code`, `timed_out`, `duration_ms`. So an agent can *verify* its work, reproduce a bug, or check output **without ever touching the host**.
