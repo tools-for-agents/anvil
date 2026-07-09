@@ -67,7 +67,10 @@ node src/cli.js sh 'apk info 2>/dev/null | head'
 `anvil` is the **execute/verify** leg of the `tools-for-agents` toolkit:
 
 - 🛰️ [**agent-hq**](https://github.com/tools-for-agents/agent-hq) — coordinate (memory, kanban, dashboard)
-- 🔎 [**lens**](https://github.com/tools-for-agents/lens) — read efficiently (token-budgeted retrieval)
+- 🔎 [**lens**](https://github.com/tools-for-agents/lens) — read code (token-budgeted retrieval)
 - 🔨 **anvil** — run safely (sandboxed execution)
+- 🧠 [**cortex**](https://github.com/tools-for-agents/cortex) — remember (Obsidian-compatible second brain)
+- 🧭 [**scout**](https://github.com/tools-for-agents/scout) — read the web (clean, cached markdown)
+- 🎯 [**recall**](https://github.com/tools-for-agents/recall) — recall it all (one query across every store)
 
 MIT licensed.
