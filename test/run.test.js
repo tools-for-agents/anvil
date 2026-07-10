@@ -1,12 +1,13 @@
 // anvil tests — run with `node --test`. The preset/log/serve tests always run;
-// the sandbox tests need a Docker that can actually *run a container* and skip
-// cleanly otherwise. Note: some CI runners report a docker version but can't run
-// containers (e.g. image-pull rate limits), so probing `docker version` is not
-// enough — we run a throwaway container and only execute the exec tests if it works.
+// the sandbox tests need a Docker that can actually run anvil's containers and
+// skip cleanly otherwise. Probing `docker version` (or a bare `docker run`) is
+// not enough: some CI runners report a version and can run a plain container, yet
+// reject the resource-limit flags anvil uses (--cpus / --memory-swap / --pids-limit
+// / bind mount) under their constrained cgroups. So we probe with run() itself —
+// the exact invocation the tests exercise — and skip if it can't produce output.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { PRESETS, dockerAvailable, run } from '../src/run.js';
+import { PRESETS, run } from '../src/run.js';
 
 test('PRESETS map languages to images and commands', () => {
   assert.equal(PRESETS.python.image, 'python:3.12-alpine');
@@ -14,13 +15,8 @@ test('PRESETS map languages to images and commands', () => {
   assert.equal(PRESETS.bash.cmd('main.sh'), 'sh main.sh');
 });
 
-function canRunContainers() {
-  if (!dockerAvailable()) return false;
-  const r = spawnSync('docker', ['run', '--rm', 'alpine:3.20', 'echo', 'anvil-probe'],
-    { encoding: 'utf8', timeout: 90_000 });
-  return r.status === 0 && /anvil-probe/.test(r.stdout || '');
-}
-const noDocker = !canRunContainers() && 'docker cannot run containers in this environment';
+const probe = await run({ lang: 'bash', code: 'echo anvil-probe' }).catch(() => ({}));
+const noDocker = !(probe.ok && /anvil-probe/.test(probe.stdout || '')) && 'docker cannot run anvil containers here';
 
 test('run executes code and returns structured output', { skip: noDocker }, async () => {
   const r = await run({ lang: 'python', code: 'print(2**10)' });
