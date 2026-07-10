@@ -107,6 +107,18 @@ test('serve: runs list, run detail, stats and the not-found guard', async () => 
     assert.ok(ex.run_id, 'exec logs a new run and returns its id');
     const afterEx = (await fetch(`${base}/api/stats`).then((r) => r.json())).runs;
     assert.equal(afterEx, beforeEx + 1, 'the exec run appears in the log');
+
+    // the resource-limit preset picker forwards mem/cpus/timeout to the logged run
+    const strict = await post({ lang: 'python', code: 'print(1)', network: 'on', mem: '256m', cpus: '0.5', timeout_ms: 15000 }).then((r) => r.json());
+    const rec = await fetch(`${base}/api/run?id=${strict.run_id}`).then((r) => r.json());
+    assert.equal(rec.mem, '256m', 'the preset mem is recorded');
+    assert.equal(rec.cpus, '0.5', 'the preset cpus is recorded');
+    assert.equal(rec.timeout_ms, 15000, 'the preset timeout is recorded');
+    assert.equal(rec.network, 'on', 'the networked profile is recorded');
+    // a malformed limit is rejected — falls back to the run() default, not a bad docker flag
+    const bad = await post({ lang: 'python', code: 'print(1)', mem: 'lots', cpus: 'abc' }).then((r) => r.json());
+    const badRec = await fetch(`${base}/api/run?id=${bad.run_id}`).then((r) => r.json());
+    assert.notEqual(badRec.mem, 'lots', 'a malformed mem is not forwarded to the container');
   } finally { server.close(); }
 });
 

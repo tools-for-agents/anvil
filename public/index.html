@@ -65,6 +65,11 @@
   .modal-x:hover { color:var(--txt); border-color:var(--ember); }
   .rm-title { font-family:var(--mono); font-size:14px; font-weight:700; color:var(--txt); margin:0 34px 14px 0; display:flex; align-items:center; gap:8px; }
   .rm-title .mk { color:var(--ember); }
+  .rm-presets { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+  .rm-presets .rm-plabel { font-family:var(--mono); font-size:9px; color:var(--faint); text-transform:uppercase; letter-spacing:1px; margin-right:2px; }
+  .rm-preset { font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:20px; padding:3px 11px; cursor:pointer; transition:color .12s, border-color .12s, background .12s; }
+  .rm-preset:hover { color:var(--txt); }
+  .rm-preset.on { color:var(--ember); border-color:var(--ember); background:rgba(255,106,26,.1); }
   .rm-row { display:flex; align-items:center; gap:14px; margin-bottom:10px; }
   #rm-lang { font-family:var(--mono); font-size:12px; color:var(--txt); background:var(--panel-2); border:1px solid var(--line);
     border-radius:8px; padding:6px 10px; cursor:pointer; }
@@ -217,6 +222,12 @@
     <div class="modal" role="dialog" aria-modal="true" aria-label="New sandbox run">
       <button class="modal-x" id="rm-close" aria-label="Close">×</button>
       <div class="rm-title"><span class="mk">⚒</span> new sandbox run</div>
+      <div class="rm-presets" id="rm-presets" role="group" aria-label="Resource profile">
+        <span class="rm-plabel">profile</span>
+        <button type="button" class="rm-preset" data-preset="strict" title="network off · 256m · 0.5 cpu · 15s">🔒 strict</button>
+        <button type="button" class="rm-preset on" data-preset="default" title="network off · 512m · 1 cpu · 30s">⚙ default</button>
+        <button type="button" class="rm-preset" data-preset="networked" title="network on · 512m · 1 cpu · 60s">🌐 networked</button>
+      </div>
       <div class="rm-row">
         <select id="rm-lang" aria-label="Language">
           <option value="python">python</option>
@@ -228,7 +239,7 @@
       <textarea id="rm-code" spellcheck="false" autocomplete="off" placeholder="print(sum(range(1, 101)))"></textarea>
       <div class="rm-err" id="rm-err" hidden></div>
       <div class="rm-foot">
-        <span class="rm-hint">throwaway container · network off · 512m · 30s</span>
+        <span class="rm-hint" id="rm-hint">throwaway container · network off · 512m · 1 cpu · 30s</span>
         <button class="rm-run" id="rm-run">▶ run</button>
       </div>
     </div>
@@ -255,7 +266,29 @@ async function refreshRuns() {
 refreshRuns();
 
 // ── New run (interactive sandbox) ────────────────────────────────────────────
-function openRunModal() { $('#run-modal').hidden = false; $('#rm-err').hidden = true; setTimeout(() => $('#rm-code').focus(), 30); }
+// Resource-limit presets prefill the sandbox profile so common cases are one click.
+const RUN_PRESETS = {
+  strict:    { network: 'none', mem: '256m', cpus: '0.5', timeout_ms: 15000 },
+  default:   { network: 'none', mem: '512m', cpus: '1',   timeout_ms: 30000 },
+  networked: { network: 'on',   mem: '512m', cpus: '1',   timeout_ms: 60000 },
+};
+let runProfile = { ...RUN_PRESETS.default };
+function updateRunHint() {
+  $('#rm-hint').textContent = `throwaway container · network ${runProfile.network === 'on' ? 'on' : 'off'} · ${runProfile.mem} · ${runProfile.cpus} cpu · ${Math.round(runProfile.timeout_ms / 1000)}s`;
+}
+function applyPreset(key) {
+  const p = RUN_PRESETS[key]; if (!p) return;
+  runProfile = { ...p };
+  $('#rm-net').checked = p.network === 'on';
+  document.querySelectorAll('#rm-presets .rm-preset').forEach((b) => b.classList.toggle('on', b.dataset.preset === key));
+  updateRunHint();
+}
+$('#rm-presets').addEventListener('click', (e) => { const b = e.target.closest('[data-preset]'); if (b) applyPreset(b.dataset.preset); });
+$('#rm-net').addEventListener('change', () => {   // manual network toggle overrides the preset's network
+  runProfile.network = $('#rm-net').checked ? 'on' : 'none';
+  updateRunHint();
+});
+function openRunModal() { $('#run-modal').hidden = false; $('#rm-err').hidden = true; applyPreset('default'); setTimeout(() => $('#rm-code').focus(), 30); }
 function closeRunModal() { $('#run-modal').hidden = true; }
 $('#newRunBtn').addEventListener('click', openRunModal);
 $('#rm-close').addEventListener('click', closeRunModal);
@@ -269,7 +302,8 @@ async function submitRun() {
   btn.disabled = true; btn.textContent = '▶ running…'; err.hidden = true;
   try {
     const res = await fetch('/api/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lang: $('#rm-lang').value, code, network: $('#rm-net').checked ? 'on' : 'none' }) }).then((r) => r.json());
+      body: JSON.stringify({ lang: $('#rm-lang').value, code, network: $('#rm-net').checked ? 'on' : 'none',
+        mem: runProfile.mem, cpus: runProfile.cpus, timeout_ms: runProfile.timeout_ms }) }).then((r) => r.json());
     if (!res.run_id) throw new Error(res.error || 'run failed');    // a failed *sandbox* run still returns a run_id (worth opening)
     closeRunModal();
     await refreshRuns();

@@ -93,8 +93,12 @@ export function createAnvilServer() {
         const lang = String(body.lang || '').toLowerCase();
         if (!EXEC_LANGS.has(lang)) return json(res, 400, { error: 'lang must be one of: bash, node, python' });
         if (typeof body.code !== 'string' || !body.code.trim()) return json(res, 400, { error: 'code is required' });
-        const opts = { lang, code: body.code, network: body.network === 'on' ? 'on' : 'none',
-          timeout_ms: body.timeout_ms ? Math.min(+body.timeout_ms, 300000) : undefined, noLog: true };
+        const opts = { lang, code: body.code, network: body.network === 'on' ? 'on' : 'none', noLog: true };
+        // resource profile from the new-run form's preset picker — validated so a
+        // malformed value can't reach the docker flags (falls back to run() defaults)
+        if (typeof body.mem === 'string' && /^\d{1,5}m$/.test(body.mem)) opts.mem = body.mem;
+        if (body.cpus != null && Number.isFinite(+body.cpus) && +body.cpus > 0) opts.cpus = String(+body.cpus);
+        if (body.timeout_ms != null && Number.isFinite(+body.timeout_ms) && +body.timeout_ms > 0) opts.timeout_ms = Math.min(Math.floor(+body.timeout_ms), 300000);
         const result = await run(opts);
         const run_id = logRun({ opts, result });
         return json(res, 200, { run_id, ...result });
