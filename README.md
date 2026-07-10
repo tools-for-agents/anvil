@@ -1,4 +1,4 @@
-# 🔨 anvil
+# ⚒ anvil
 
 [![ci](https://github.com/tools-for-agents/anvil/actions/workflows/ci.yml/badge.svg)](https://github.com/tools-for-agents/anvil/actions/workflows/ci.yml)
 
@@ -92,7 +92,7 @@ Logging is opt-in, fire-and-forget and fully guarded — it never slows or break
 
 - 🛰️ [**agent-hq**](https://github.com/tools-for-agents/agent-hq) — coordinate (memory, kanban, dashboard)
 - 🔎 [**lens**](https://github.com/tools-for-agents/lens) — read code (token-budgeted retrieval)
-- 🔨 **anvil** — run safely (sandboxed execution)
+- ⚒ **anvil** — run safely (sandboxed execution)
 - 🧠 [**cortex**](https://github.com/tools-for-agents/cortex) — remember (Obsidian-compatible second brain)
 - 🧭 [**scout**](https://github.com/tools-for-agents/scout) — read the web (clean, cached markdown)
 - 🎯 [**recall**](https://github.com/tools-for-agents/recall) — recall it all (one query across every store)
