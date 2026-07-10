@@ -65,6 +65,19 @@ test('serve: runs list, run detail, stats and the not-found guard', async () => 
     assert.ok(rr.run_id && rr.run_id !== okId, 'rerun logs a new run and returns its id');
     const after = (await fetch(`${base}/api/stats`).then((r) => r.json())).runs;
     assert.equal(after, before + 1, 'the rerun appears in the log');
+
+    // exec — the dashboard "new run" form (Docker-free: run() returns an error result
+    // without Docker, but the endpoint still logs a new run and returns its id).
+    const exGet = await fetch(`${base}/api/exec`);
+    assert.equal(exGet.status, 405, 'exec requires POST');
+    const post = (body) => fetch(`${base}/api/exec`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await post({ lang: 'ruby', code: 'x' })).status, 400, 'unknown lang is 400');
+    assert.equal((await post({ lang: 'python', code: '   ' })).status, 400, 'blank code is 400');
+    const beforeEx = (await fetch(`${base}/api/stats`).then((r) => r.json())).runs;
+    const ex = await post({ lang: 'python', code: 'print(1)' }).then((r) => r.json());
+    assert.ok(ex.run_id, 'exec logs a new run and returns its id');
+    const afterEx = (await fetch(`${base}/api/stats`).then((r) => r.json())).runs;
+    assert.equal(afterEx, beforeEx + 1, 'the exec run appears in the log');
   } finally { server.close(); }
 });
 

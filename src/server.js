@@ -49,6 +49,16 @@ const api = {
   '/api/health': () => ({ ok: true, service: 'anvil', ts: new Date().toISOString() }),
 };
 
+const EXEC_LANGS = new Set(['bash', 'sh', 'node', 'javascript', 'python']);
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '', size = 0;
+    req.on('data', (c) => { size += c.length; if (size > 262144) { reject(new Error('body too large')); req.destroy(); } else data += c; });
+    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { reject(new Error('invalid JSON body')); } });
+    req.on('error', reject);
+  });
+}
+
 async function serveStatic(res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
   const filePath = normalize(join(PUBLIC, rel));
@@ -75,6 +85,21 @@ export function createAnvilServer() {
     }
     // /api/rerun executes code — require POST so a stray GET/prefetch can't trigger a run.
     if (url.pathname === '/api/rerun' && req.method !== 'POST') return json(res, 405, { error: 'use POST' });
+    // /api/exec — run a fresh snippet from the dashboard's "new run" form (POST only; it executes code).
+    if (url.pathname === '/api/exec') {
+      if (req.method !== 'POST') return json(res, 405, { error: 'use POST' });
+      try {
+        const body = await readBody(req);
+        const lang = String(body.lang || '').toLowerCase();
+        if (!EXEC_LANGS.has(lang)) return json(res, 400, { error: 'lang must be one of: bash, node, python' });
+        if (typeof body.code !== 'string' || !body.code.trim()) return json(res, 400, { error: 'code is required' });
+        const opts = { lang, code: body.code, network: body.network === 'on' ? 'on' : 'none',
+          timeout_ms: body.timeout_ms ? Math.min(+body.timeout_ms, 300000) : undefined, noLog: true };
+        const result = await run(opts);
+        const run_id = logRun({ opts, result });
+        return json(res, 200, { run_id, ...result });
+      } catch (e) { return json(res, 400, { error: String(e.message || e) }); }
+    }
     const handler = api[url.pathname];
     if (handler) {
       const q = Object.fromEntries(url.searchParams.entries());
