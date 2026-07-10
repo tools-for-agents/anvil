@@ -32,7 +32,12 @@
   .brand .mk { font-size:22px; color:var(--ember); text-shadow:0 0 14px var(--ember-glow); }
   .brand b { font-size:16px; letter-spacing:.3px; }
   .brand .sub { font-family:var(--mono); font-size:10.5px; color:var(--muted); letter-spacing:.4px; }
-  .metrics { display:flex; gap:9px; margin-left:auto; }
+  .metrics { display:flex; gap:9px; margin-left:16px; }
+  .lang-strip { display:flex; align-items:center; gap:8px; margin-left:auto; overflow:hidden; }
+  .lang-strip .ls-label { font-family:var(--mono); font-size:8.5px; color:var(--faint); text-transform:uppercase; letter-spacing:1px; flex:none; }
+  .lang-pill { display:inline-flex; align-items:center; gap:5px; font-family:var(--mono); font-size:10.5px; color:var(--muted); white-space:nowrap; }
+  .lang-pill i { width:7px; height:7px; border-radius:2px; flex:none; }
+  .lang-pill b { color:var(--txt); font-variant-numeric:tabular-nums; }
   .metric { font-family:var(--mono); background:var(--panel-2); border:1px solid var(--line); border-radius:9px; padding:6px 12px; text-align:center; min-width:60px; }
   .metric b { display:block; font-size:16px; font-variant-numeric:tabular-nums; }
   .metric.ok b { color:var(--ok); } .metric.fail b { color:var(--fail); } .metric.ember b { color:var(--ember); }
@@ -160,6 +165,7 @@
 <body>
   <header class="top">
     <div class="brand"><span class="mk">⚒</span><div><b>anvil</b> <span class="sub">forge log · sandbox runs</span></div></div>
+    <div class="lang-strip" id="langStrip"></div>
     <div class="metrics" id="metrics"></div>
   </header>
 
@@ -258,6 +264,20 @@ function renderMetrics(s) {
     ['fail', s.failed, 'failed'],
     ['', s.avg_ms + 'ms', 'avg'],
   ].map(([c, v, l]) => `<div class="metric ${c}"><b>${v}</b><span>${l}</span></div>`).join('');
+  renderLangStrip(s);
+}
+// Which languages the sandbox has been running, from the log — image tags collapse to their base (node:22-alpine → node).
+const LANG_COL = { python:'#6ea8fe', node:'#8fbf5a', javascript:'#8fbf5a', bash:'#c9a86a', sh:'#c9a86a', ruby:'#e5544a', go:'#4fd6be', alpine:'#9aa199' };
+const langLabel = (l) => String(l).includes(':') ? String(l).split(':')[0] : String(l);
+const langColor = (l) => LANG_COL[l] || 'var(--muted)';
+function renderLangStrip(s) {
+  const byLang = {};
+  for (const e of (s.by_lang || [])) { const k = langLabel(e.lang); byLang[k] = (byLang[k] || 0) + e.n; }
+  const langs = Object.entries(byLang).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  $('#langStrip').innerHTML = langs.length
+    ? `<span class="ls-label">by lang</span>` + langs.map(([l, n]) =>
+        `<span class="lang-pill" title="${esc(l)}: ${n} run${n === 1 ? '' : 's'}"><i style="background:${langColor(l)}"></i>${esc(l)} <b>${n}</b></span>`).join('')
+    : '';
 }
 
 // ── Run list ─────────────────────────────────────────────────────────────────

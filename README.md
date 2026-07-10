@@ -50,7 +50,7 @@ A zero-dependency **forge log** of what the sandbox executed:
 - **Compare two runs** — hit **⇄ compare**, pick any two runs, and see a side-by-side line diff of their code, stdout and stderr, plus every limit that changed (`took 258ms → 559ms`, `mem 512m → 256m`).
 - **New run** — hit **＋ new run** to type a snippet (bash / node / python), execute it in a fresh sandbox right from the dashboard, and watch the result open in the detail. Runs go through the same guarded, network-off container as the CLI (⌘/Ctrl+Enter to run).
 - **Re-run** — hit **↻ re-run** on any run to re-execute its exact code and limits in a fresh sandbox; the new run is logged and opened, so you can compare it against the original.
-- **Filters + stats** — narrow to failures, see ok/failed counts and average duration.
+- **Filters + stats** — narrow to failures, see ok/failed counts, average duration, and a **by-language** breakdown of everything the sandbox has run (`python 3 · node 1 · bash 1`).
 
 Logging is opt-in, fire-and-forget and fully guarded — it never slows or breaks a run. Try the demo without Docker: `ANVIL_DB=./.anvil/runs.db node scripts/seed.js` then `anvil serve`.
 

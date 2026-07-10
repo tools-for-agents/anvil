@@ -23,6 +23,12 @@ test('log: stats aggregates ok / failed counts', () => {
   assert.equal(s.runs, 2);
   assert.equal(s.ok, 1);
   assert.equal(s.failed, 1);
+  // by_lang drives the header language breakdown
+  assert.ok(Array.isArray(s.by_lang), 'by_lang is an array');
+  assert.equal(s.by_lang.reduce((a, e) => a + e.n, 0), s.runs, 'the per-language counts sum to the total');
+  const langs = Object.fromEntries(s.by_lang.map((e) => [e.lang, e.n]));
+  assert.equal(langs.python, 1);
+  assert.equal(langs.bash, 1);
 });
 
 test('serve: runs list, run detail, stats and the not-found guard', async () => {
