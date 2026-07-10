@@ -50,6 +50,7 @@ A zero-dependency **forge log** of what the sandbox executed:
 - **Compare two runs** — hit **⇄ compare**, pick any two runs, and see a side-by-side line diff of their code, stdout and stderr, plus every limit that changed (`took 258ms → 559ms`, `mem 512m → 256m`).
 - **New run** — hit **＋ new run** to type a snippet (bash / node / python), execute it in a fresh sandbox right from the dashboard, and watch the result open in the detail. Runs go through the same guarded, network-off container as the CLI (⌘/Ctrl+Enter to run).
 - **Re-run** — hit **↻ re-run** on any run to re-execute its exact code and limits in a fresh sandbox; the new run is logged and opened, so you can compare it against the original.
+- **Search** — a live search box filters the log by **code, command, language or captured output** as you type (matches highlighted, with a running `3 / 7` count); `Esc` clears it. Composes with the status filters, so you can find "that `curl` run that failed" in a long history.
 - **Filters + stats** — narrow to failures, see ok/failed counts, average duration, and a **by-language** breakdown of everything the sandbox has run (`python 3 · node 1 · bash 1`).
 - **Keyboard-accessible** — every control has a visible focus ring, and the run rows open with Tab + Enter (not just the mouse), with aria-labels throughout.
 

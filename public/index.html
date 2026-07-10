@@ -85,6 +85,14 @@
     background:var(--ember); border:1px solid var(--ember); border-radius:9px; padding:7px 18px; cursor:pointer; transition:background .12s; }
   .rm-run:hover { background:var(--ember-hot); }
   .rm-run:disabled { opacity:.6; cursor:default; }
+  .search-row { display:flex; align-items:center; gap:8px; padding:8px 13px; border-bottom:1px solid var(--line); }
+  .search-row .sr-icon { font-family:var(--mono); font-size:13px; color:var(--faint); flex:none; }
+  .run-search { flex:1; min-width:0; font-family:var(--mono); font-size:11.5px; color:var(--txt);
+    background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:6px 11px; outline:none; transition:border-color .12s; }
+  .run-search:focus { border-color:var(--ember); }
+  .run-search::placeholder { color:var(--faint); }
+  .run-count { font-family:var(--mono); font-size:10px; color:var(--faint); white-space:nowrap; flex:none; font-variant-numeric:tabular-nums; }
+  .run .cmd mark, .run .badge mark { background:rgba(255,106,26,.28); color:var(--ember-hot); border-radius:2px; padding:0 1px; }
   .runs { flex:1; overflow:auto; }
   .run {
     display:grid; grid-template-columns:auto 1fr auto; gap:11px; align-items:center;
@@ -183,6 +191,12 @@
       <button data-f="timeout">timed&nbsp;out</button>
       <button id="cmpToggle" class="cmp-toggle" title="Compare two runs side by side">⇄ compare</button>
     </div>
+    <div class="search-row">
+      <span class="sr-icon" aria-hidden="true">⌕</span>
+      <input id="runSearch" class="run-search" type="text" autocomplete="off" spellcheck="false"
+             placeholder="search code · command · lang · output…" aria-label="Search runs" />
+      <span class="run-count" id="runCount"></span>
+    </div>
     <div class="runs" id="runs"></div>
   </section>
 
@@ -221,7 +235,7 @@ const $ = (s) => document.querySelector(s);
 const api = (p) => fetch(p).then((r) => r.json());
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
-let RUNS = [], filter = 'all', activeId = null, compareMode = false, sel = [];
+let RUNS = [], filter = 'all', activeId = null, compareMode = false, sel = [], query = '';
 const WELCOME_HTML = document.getElementById('detailEmpty').innerHTML;   // to restore when leaving compare
 
 const statusOf = (r) => r.timed_out ? 'timeout' : r.error ? 'error' : r.ok ? 'ok' : 'failed';
@@ -286,11 +300,35 @@ function renderLangStrip(s) {
 }
 
 // ── Run list ─────────────────────────────────────────────────────────────────
+// A run matches the search box if the query appears in its code, command,
+// language, image or captured stdout (case-insensitive substring).
+const rxEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function hl(text, q) {
+  const e = esc(text);
+  if (!q) return e;
+  try { return e.replace(new RegExp('(' + rxEsc(q) + ')', 'ig'), '<mark>$1</mark>'); } catch { return e; }
+}
+function matchesQuery(r) {
+  if (!query) return true;
+  return `${r.code_preview || ''} ${r.cmd || ''} ${r.lang || ''} ${r.image || ''} ${r.stdout_preview || ''}`
+    .toLowerCase().includes(query);
+}
 function renderRuns() {
-  const rows = RUNS.filter((r) => filter === 'all' || statusOf(r) === filter ||
-    (filter === 'failed' && statusOf(r) === 'error'));
-  if (!rows.length) { $('#runs').innerHTML = `<div class="list-empty"><div class="big">⚒</div><div>The forge is cold — no ${filter === 'all' ? '' : filter + ' '}runs yet.</div></div>`; return; }
+  const rows = RUNS.filter((r) => (filter === 'all' || statusOf(r) === filter ||
+    (filter === 'failed' && statusOf(r) === 'error')) && matchesQuery(r));
+  renderCount(rows.length);
+  if (!rows.length) {
+    $('#runs').innerHTML = query
+      ? `<div class="list-empty"><div class="big">⌕</div><div>No runs match “${esc(query)}”.</div></div>`
+      : `<div class="list-empty"><div class="big">⚒</div><div>The forge is cold — no ${filter === 'all' ? '' : filter + ' '}runs yet.</div></div>`;
+    return;
+  }
   $('#runs').innerHTML = rows.map(runRow).join('');
+}
+function renderCount(shown) {
+  const el = $('#runCount'); if (!el) return;
+  const total = RUNS.length;
+  el.textContent = (query || filter !== 'all') ? `${shown} / ${total}` : `${total} run${total === 1 ? '' : 's'}`;
 }
 function runRow(r) {
   const st = statusOf(r);
@@ -299,9 +337,9 @@ function runRow(r) {
   const si = sel.indexOf(r.id);
   const rt = compareMode && si >= 0 ? `<span class="cmp-badge">${si === 0 ? 'A' : 'B'}</span>` : `${r.duration_ms}ms<br />${ago(r.ts)}`;
   return `<div class="run${activeId === r.id && !compareMode ? ' active' : ''}${si >= 0 ? ' selected' : ''}" data-id="${r.id}" style="--st:${STCOL[st]}" tabindex="0" role="button" aria-label="Run: ${esc(label)} — ${STLABEL[st]}">
-    <span class="badge">${esc(lang)}</span>
+    <span class="badge">${hl(lang, query)}</span>
     <div class="mid">
-      <div class="cmd">${esc(label)}</div>
+      <div class="cmd">${hl(label, query)}</div>
       <div class="sub"><span class="st-pill">${STLABEL[st]}</span>${r.timed_out ? '' : ` · exit ${r.exit_code}`}${r.network === 'on' ? ' · net' : ''}</div>
     </div>
     <div class="rt">${rt}</div>
@@ -334,6 +372,10 @@ $('#filters').addEventListener('click', (e) => {
   filter = b.dataset.f;
   document.querySelectorAll('#filters button').forEach((x) => x.classList.toggle('on', x.dataset.f === filter));
   renderRuns();
+});
+$('#runSearch').addEventListener('input', (e) => { query = e.target.value.trim().toLowerCase(); renderRuns(); });
+$('#runSearch').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.target.value = ''; query = ''; renderRuns(); }   // Esc clears the search
 });
 
 // ── Compare mode ─────────────────────────────────────────────────────────────

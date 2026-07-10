@@ -10,7 +10,7 @@ const dir = mkdtempSync(join(tmpdir(), 'anvil-serve-'));
 process.env.ANVIL_DB = join(dir, 'runs.db');
 process.on('exit', () => { try { rmSync(dir, { recursive: true, force: true }); } catch {} });
 
-const { logRun, stats, lineDiff } = await import('../src/log.js');
+const { logRun, stats, lineDiff, recentRuns } = await import('../src/log.js');
 const { createAnvilServer } = await import('../src/server.js');
 
 const okId = logRun({ opts: { lang: 'python', code: 'print(2**10)', network: 'none', mem: '512m', cpus: '1', timeout_ms: 30000 },
@@ -29,6 +29,18 @@ test('log: stats aggregates ok / failed counts', () => {
   const langs = Object.fromEntries(s.by_lang.map((e) => [e.lang, e.n]));
   assert.equal(langs.python, 1);
   assert.equal(langs.bash, 1);
+});
+
+test('search: run rows expose the fields the forge-log search box filters on', () => {
+  const { runs } = recentRuns({ limit: 200 });
+  // the client builds this haystack per row and substring-matches the query
+  const hay = (r) => `${r.code_preview || ''} ${r.cmd || ''} ${r.lang || ''} ${r.image || ''} ${r.stdout_preview || ''}`.toLowerCase();
+  const match = (q) => runs.filter((r) => hay(r).includes(q.toLowerCase()));
+  assert.equal(match('print').length, 1, 'code text is searchable — "print" finds the python run');
+  assert.equal(match('python').length, 1, 'language / image is searchable');
+  assert.equal(match('1024').length, 1, 'stdout preview is searchable — "1024" finds the run that printed it');
+  assert.equal(match('exit').length, 1, 'the bash "exit 3" run matches "exit"');
+  assert.equal(match('zzzznope').length, 0, 'a non-match filters everything out');
 });
 
 test('serve: runs list, run detail, stats and the not-found guard', async () => {
