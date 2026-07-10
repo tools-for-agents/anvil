@@ -48,6 +48,7 @@ A zero-dependency **forge log** of what the sandbox executed:
 - **Run list** — every execution with its language, status (ok / failed / timed out), exit code and duration, colour-coded at a glance.
 - **Run detail** — the exact code or command, full **stdout** and **stderr**, and the resource limits it ran under (network, memory, cpus, timeout).
 - **Compare two runs** — hit **⇄ compare**, pick any two runs, and see a side-by-side line diff of their code, stdout and stderr, plus every limit that changed (`took 258ms → 559ms`, `mem 512m → 256m`).
+- **Re-run** — hit **↻ re-run** on any run to re-execute its exact code and limits in a fresh sandbox; the new run is logged and opened, so you can compare it against the original.
 - **Filters + stats** — narrow to failures, see ok/failed counts and average duration.
 
 Logging is opt-in, fire-and-forget and fully guarded — it never slows or breaks a run. Try the demo without Docker: `ANVIL_DB=./.anvil/runs.db node scripts/seed.js` then `anvil serve`.

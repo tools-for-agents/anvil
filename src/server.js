@@ -5,7 +5,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname, normalize } from 'node:path';
-import { recentRuns, getRun, diffRuns, stats } from './log.js';
+import { recentRuns, getRun, diffRuns, logRun, stats } from './log.js';
+import { run } from './run.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(__dir, '..', 'public');
@@ -30,6 +31,20 @@ const api = {
     const d = q.a && q.b && diffRuns(q.a, q.b);
     if (!d) throw new Error('run not found');
     return d;
+  },
+  // Re-execute a logged run (its exact code/command + limits) and log the result
+  // as a new run. noLog so we log it ourselves and can return the new id.
+  '/api/rerun': async (q) => {
+    const src = q.id && getRun(q.id);
+    if (!src) throw new Error('run not found');
+    const base = { network: src.network || 'none', mem: src.mem || undefined,
+      cpus: src.cpus || undefined, timeout_ms: src.timeout_ms || undefined, noLog: true };
+    const opts = (src.lang && src.code != null)
+      ? { lang: src.lang, code: src.code, ...base }
+      : { image: src.image || 'alpine:3.20', cmd: src.cmd || '', ...base };
+    const result = await run(opts);
+    const run_id = logRun({ opts, result });
+    return { run_id, ...result };
   },
   '/api/health': () => ({ ok: true, service: 'anvil', ts: new Date().toISOString() }),
 };
@@ -58,6 +73,8 @@ export function createAnvilServer() {
       res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS' });
       return res.end();
     }
+    // /api/rerun executes code — require POST so a stray GET/prefetch can't trigger a run.
+    if (url.pathname === '/api/rerun' && req.method !== 'POST') return json(res, 405, { error: 'use POST' });
     const handler = api[url.pathname];
     if (handler) {
       const q = Object.fromEntries(url.searchParams.entries());

@@ -68,6 +68,9 @@
   .d-status { font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:.5px; padding:4px 12px; border-radius:8px; color:var(--st); background:color-mix(in srgb, var(--st) 15%, transparent); border:1px solid color-mix(in srgb, var(--st) 45%, transparent); }
   .d-title { font-family:var(--mono); font-size:15px; color:var(--txt); }
   .d-when { margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  .rerun-btn { font-family:var(--mono); font-size:11.5px; color:var(--ember); background:rgba(255,106,26,.1); border:1px solid var(--ember); border-radius:8px; padding:5px 12px; cursor:pointer; transition:background .12s; }
+  .rerun-btn:hover { background:rgba(255,106,26,.2); }
+  .rerun-btn:disabled { opacity:.6; cursor:default; }
   .chips { display:flex; gap:7px; flex-wrap:wrap; margin:14px 0 20px; }
   .chip { font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:7px; padding:4px 10px; }
   .chip b { color:var(--txt); font-weight:600; }
@@ -157,11 +160,12 @@ const STCOL = { ok: 'var(--ok)', failed: 'var(--fail)', error: 'var(--fail)', ti
 const STLABEL = { ok: 'ok', failed: 'failed', error: 'error', timeout: 'timeout' };
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
-(async () => {
+async function refreshRuns() {
   const [stats, runs] = await Promise.all([api('/api/stats'), api('/api/runs?limit=200')]);
   RUNS = runs.runs;
   renderMetrics(stats); renderRuns();
-})();
+}
+refreshRuns();
 
 function renderMetrics(s) {
   $('#metrics').innerHTML = [
@@ -197,6 +201,18 @@ function runRow(r) {
 $('#runs').addEventListener('click', (e) => {
   const el = e.target.closest('.run'); if (!el) return;
   if (compareMode) toggleSelect(el.dataset.id); else openRun(el.dataset.id);
+});
+// Re-run: re-execute a logged run, then jump to the new run it produced.
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-rerun]'); if (!btn) return;
+  const id = btn.dataset.rerun, label = btn.textContent;
+  btn.disabled = true; btn.textContent = '↻ running…';
+  try {
+    const res = await fetch('/api/rerun?id=' + encodeURIComponent(id), { method: 'POST' }).then((r) => r.json());
+    await refreshRuns();
+    if (res.run_id) openRun(res.run_id);           // the detail re-renders, replacing this button
+    else { btn.disabled = false; btn.textContent = label; }
+  } catch { btn.disabled = false; btn.textContent = label; }
 });
 $('#filters').addEventListener('click', (e) => {
   const b = e.target.closest('[data-f]'); if (!b) return;
@@ -292,6 +308,7 @@ async function openRun(id) {
       <span class="d-status" style="--st:${STCOL[st]}">${STLABEL[st].toUpperCase()}</span>
       <span class="d-title">${esc(lang)} · ${esc(r.image || '')}</span>
       <span class="d-when">${new Date(r.ts).toLocaleString()}</span>
+      <button class="rerun-btn" data-rerun="${esc(r.id)}" title="Re-execute this run in a fresh sandbox">↻ re-run</button>
     </div>
     <div class="chips">
       <span class="chip">exit <b>${r.timed_out ? '—' : r.exit_code}</b></span>

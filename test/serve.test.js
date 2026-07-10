@@ -53,6 +53,18 @@ test('serve: runs list, run detail, stats and the not-found guard', async () => 
 
     const dmiss = await fetch(`${base}/api/diff?a=${okId}&b=run_nope`);
     assert.equal(dmiss.status, 404, 'diff with a missing run is 404');
+
+    // rerun — Docker-free assertions (run() returns an error result without Docker,
+    // and the endpoint still logs a new run and returns its id either way).
+    const rrGet = await fetch(`${base}/api/rerun?id=${okId}`);
+    assert.equal(rrGet.status, 405, 'rerun requires POST');
+    const rrMiss = await fetch(`${base}/api/rerun?id=run_nope`, { method: 'POST' });
+    assert.equal(rrMiss.status, 404, 'rerun with a missing run is 404');
+    const before = (await fetch(`${base}/api/stats`).then((r) => r.json())).runs;
+    const rr = await fetch(`${base}/api/rerun?id=${okId}`, { method: 'POST' }).then((r) => r.json());
+    assert.ok(rr.run_id && rr.run_id !== okId, 'rerun logs a new run and returns its id');
+    const after = (await fetch(`${base}/api/stats`).then((r) => r.json())).runs;
+    assert.equal(after, before + 1, 'the rerun appears in the log');
   } finally { server.close(); }
 });
 

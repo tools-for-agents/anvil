@@ -37,7 +37,8 @@ function safeJoin(base, rel) {
   return p;
 }
 
-// run({ image?, lang?, code?, cmd?, files?, stdin?, timeout_ms?, network?, mem?, cpus?, secure? })
+// run({ image?, lang?, code?, cmd?, files?, stdin?, timeout_ms?, network?, mem?, cpus?, secure?, noLog? })
+// noLog: skip the opt-in auto-log (the caller will log it itself, e.g. to capture the new id).
 export function run(opts = {}) {
   return new Promise((resolveP) => {
     const docker = dockerAvailable();
@@ -112,14 +113,14 @@ export function run(opts = {}) {
         stdout: out.slice(0, MAX_OUTPUT) + (outTrunc ? '\n…[truncated]' : ''),
         stderr: err.slice(0, MAX_OUTPUT) + (errTrunc ? '\n…[truncated]' : ''),
       };
-      maybeLog(logOpts, result);
+      if (!opts.noLog) maybeLog(logOpts, result);
       resolveP(result);
     });
     child.on('error', (e) => {
       clearTimeout(killer);
       rmSync(work, { recursive: true, force: true });
       const result = { ok: false, error: `failed to start docker: ${e.message}`, duration_ms: Date.now() - started };
-      maybeLog(logOpts, result);
+      if (!opts.noLog) maybeLog(logOpts, result);
       resolveP(result);
     });
   });
