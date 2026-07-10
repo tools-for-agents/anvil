@@ -84,6 +84,16 @@
   ::-webkit-scrollbar-thumb { background:var(--line); border-radius:8px; }
   ::-webkit-scrollbar-thumb:hover { background:var(--line-2); }
   @media (max-width:820px) { body { grid-template-columns:1fr; grid-template-areas:"top" "list"; } .detail-pane { display:none; } body.viewing { grid-template-areas:"top" "detail"; } body.viewing .list-pane { display:none; } body.viewing .detail-pane { display:block; } }
+
+/* cross-tool footer — this is one of tools-for-agents' six web views */
+.xtk{position:fixed;left:50%;bottom:0;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:11px;max-width:96vw;overflow-x:auto;padding:5px 14px;border:1px solid rgba(255,255,255,.1);border-bottom:none;border-radius:11px 11px 0 0;background:rgba(12,13,17,.82);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1;white-space:nowrap;opacity:.5;transition:opacity .2s;scrollbar-width:none;}
+.xtk::-webkit-scrollbar{display:none;}
+.xtk:hover{opacity:1;}
+.xtk .xtk-l{color:#8a8f9c;letter-spacing:.3px;}
+.xtk a,.xtk .cur{color:var(--x);text-decoration:none;}
+.xtk a{opacity:.62;transition:opacity .12s,text-shadow .12s;}
+.xtk a:hover{opacity:1;text-shadow:0 0 10px var(--x);}
+.xtk .cur{font-weight:700;}
 </style>
 </head>
 <body>
@@ -210,5 +220,14 @@ function ago(iso) {
   return Math.floor(s / 86400) + 'd ago';
 }
 </script>
+<div class="xtk" aria-label="tools-for-agents sibling web views">
+  <span class="xtk-l">tools-for-agents</span>
+  <a href="http://localhost:7700/" style="--x:#6ea8fe" title="open agent-hq">🛰️ agent-hq</a>
+  <a href="http://localhost:7900/" style="--x:#4fd6be" title="open lens">🔎 lens</a>
+  <span class="cur" style="--x:#ff6a1a">⚒ anvil</span>
+  <a href="http://localhost:7800/" style="--x:#a78bfa" title="open cortex">🧠 cortex</a>
+  <a href="http://localhost:7950/" style="--x:#e0a24e" title="open scout">🧭 scout</a>
+  <a href="http://localhost:7980/" style="--x:#ec4899" title="open recall">◎ recall</a>
+</div>
 </body>
 </html>
