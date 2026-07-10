@@ -31,6 +31,17 @@ test('log: stats aggregates ok / failed counts', () => {
   assert.equal(langs.bash, 1);
 });
 
+test('recentRuns coerces a bad limit instead of erroring / emptying the log', () => {
+  const good = recentRuns();
+  assert.equal(good.count, 2, 'baseline returns all runs');
+  // ?limit=abc reaches recentRuns as NaN → Math.min(NaN,500) = NaN → LIMIT NaN
+  // used to error; limit=0 → an empty log. All bad values fall back to the default.
+  for (const bad of [NaN, 0, -5, 'abc', undefined]) {
+    assert.equal(recentRuns({ limit: bad }).count, good.count, `limit=${String(bad)} recovers the default set`);
+  }
+  assert.equal(recentRuns({ limit: 1 }).count, 1, 'a valid small limit is still honoured');
+});
+
 test('search: run rows expose the fields the forge-log search box filters on', () => {
   const { runs } = recentRuns({ limit: 200 });
   // the client builds this haystack per row and substring-matches the query

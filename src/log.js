@@ -59,10 +59,14 @@ export function logRun({ opts = {}, result = {} } = {}) {
 const shape = (r) => r && { ...r, ok: !!r.ok, timed_out: !!r.timed_out };
 
 export function recentRuns({ limit = 100 } = {}) {
+  // Harden the limit: a non-numeric query param arrives as NaN (server parses
+  // ?limit=abc with +q.limit), and `Math.min(NaN, 500)` is NaN → `LIMIT NaN`
+  // errors the query; limit=0 → an empty log. Fall back to the default.
+  limit = Number.isFinite(+limit) && +limit > 0 ? Math.min(Math.floor(+limit), 500) : 100;
   const rows = all(`SELECT id, ts, lang, image, cmd, network, ok, exit_code, timed_out, duration_ms,
                     substr(code,1,200) AS code_preview, substr(stdout,1,180) AS stdout_preview,
                     (length(COALESCE(stdout,''))+length(COALESCE(stderr,''))) AS out_bytes
-                    FROM runs ORDER BY ts DESC LIMIT ?`, Math.min(limit, 500));
+                    FROM runs ORDER BY ts DESC LIMIT ?`, limit);
   return { count: rows.length, runs: rows.map(shape) };
 }
 
