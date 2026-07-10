@@ -33,6 +33,8 @@ node src/cli.js sh 'apk info 2>/dev/null | head'
 
 ## Run history (`anvil serve`)
 
+![anvil serve — the forge log: every sandbox run with its code, output, exit status and resource limits](docs/web-view.png)
+
 anvil is stateless by default. Set **`ANVIL_DB`** to record every run, then browse them in a dashboard:
 
 ```bash
