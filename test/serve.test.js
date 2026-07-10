@@ -10,12 +10,12 @@ const dir = mkdtempSync(join(tmpdir(), 'anvil-serve-'));
 process.env.ANVIL_DB = join(dir, 'runs.db');
 process.on('exit', () => { try { rmSync(dir, { recursive: true, force: true }); } catch {} });
 
-const { logRun, stats } = await import('../src/log.js');
+const { logRun, stats, lineDiff } = await import('../src/log.js');
 const { createAnvilServer } = await import('../src/server.js');
 
 const okId = logRun({ opts: { lang: 'python', code: 'print(2**10)', network: 'none', mem: '512m', cpus: '1', timeout_ms: 30000 },
   result: { ok: true, exit_code: 0, timed_out: false, duration_ms: 120, image: 'python:3.12-alpine', stdout: '1024\n', stderr: '' } });
-logRun({ opts: { lang: 'bash', code: 'exit 3' },
+const failId = logRun({ opts: { lang: 'bash', code: 'exit 3' },
   result: { ok: false, exit_code: 3, timed_out: false, duration_ms: 60, image: 'alpine:3.20', stdout: '', stderr: 'boom\n' } });
 
 test('log: stats aggregates ok / failed counts', () => {
@@ -44,5 +44,25 @@ test('serve: runs list, run detail, stats and the not-found guard', async () => 
 
     const miss = await fetch(base + '/api/run?id=run_nope');
     assert.equal(miss.status, 404, 'unknown run id is 404');
+
+    const diff = await fetch(`${base}/api/diff?a=${okId}&b=${failId}`).then((r) => r.json());
+    assert.equal(diff.a.id, okId);
+    assert.equal(diff.b.id, failId);
+    assert.ok(diff.diff.code && diff.diff.stdout && diff.diff.stderr, 'diff has all three sections');
+    assert.ok(diff.diff.code.changed > 0, 'the two runs have different code');
+
+    const dmiss = await fetch(`${base}/api/diff?a=${okId}&b=run_nope`);
+    assert.equal(dmiss.status, 404, 'diff with a missing run is 404');
   } finally { server.close(); }
+});
+
+test('lineDiff aligns rows and marks adds/removes', () => {
+  const d = lineDiff('a\nb\nc', 'a\nx\nc');
+  assert.equal(d.identical, false);
+  const del = d.rows.find((r) => r.lc === 'del');
+  const add = d.rows.find((r) => r.rc === 'add');
+  assert.equal(del.l, 'b');
+  assert.equal(add.r, 'x');
+  assert.ok(d.rows.some((r) => r.l === 'a' && r.r === 'a' && r.lc === 'same'), 'shared lines align as same');
+  assert.equal(lineDiff('same\ntext', 'same\ntext').identical, true);
 });

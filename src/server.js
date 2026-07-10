@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname, normalize } from 'node:path';
-import { recentRuns, getRun, stats } from './log.js';
+import { recentRuns, getRun, diffRuns, stats } from './log.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(__dir, '..', 'public');
@@ -25,6 +25,11 @@ const api = {
     const r = q.id && getRun(q.id);
     if (!r) throw new Error('run not found');
     return r;
+  },
+  '/api/diff': (q) => {
+    const d = q.a && q.b && diffRuns(q.a, q.b);
+    if (!d) throw new Error('run not found');
+    return d;
   },
   '/api/health': () => ({ ok: true, service: 'anvil', ts: new Date().toISOString() }),
 };

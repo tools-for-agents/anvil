@@ -80,6 +80,28 @@
   pre.stderr { color:#f0b8b0; border-left:3px solid var(--fail); }
   .none { color:var(--faint); font-family:var(--mono); font-size:12px; font-style:italic; }
 
+  /* ── Compare / diff ──────────────────────────────────────── */
+  .cmp-toggle { margin-left:auto; }
+  .filters button.cmp-toggle.on { color:var(--ember); border-color:var(--ember); background:rgba(255,106,26,.09); }
+  .run.selected { box-shadow:inset 0 0 0 1px var(--ember), inset 3px 0 0 var(--st); }
+  .cmp-badge { font-family:var(--mono); font-weight:700; font-size:11px; color:var(--ember); background:rgba(255,106,26,.13); border:1px solid var(--ember); border-radius:6px; padding:1px 8px; }
+  .diff-head { display:flex; align-items:stretch; gap:0; margin-bottom:16px; }
+  .dcol-head { flex:1; display:flex; align-items:center; gap:10px; padding:10px 13px; border:1px solid var(--line); background:var(--panel); }
+  .dcol-head:first-child { border-radius:10px 0 0 10px; } .dcol-head:last-child { border-radius:0 10px 10px 0; border-left:none; }
+  .dcol-head .d-status { padding:3px 9px; font-size:11px; }
+  .dh-t { font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  .vs { align-self:center; padding:0 12px; color:var(--faint); font-family:var(--mono); font-size:11px; }
+  .chip.diffchip { border-color:var(--ember); color:var(--txt); }
+  .chip.diffchip b:last-child { color:var(--ember); }
+  .diff { border:1px solid var(--line); border-radius:10px; overflow:hidden; margin-bottom:16px; font-family:var(--mono); font-size:12px; line-height:1.6; }
+  .drow { display:grid; grid-template-columns:1fr 1fr; }
+  .dcell { padding:1px 12px; white-space:pre-wrap; word-break:break-word; border-right:1px solid var(--line); min-width:0; color:var(--txt); }
+  .dcell:last-child { border-right:none; }
+  .dcell.same { color:var(--muted); }
+  .dcell.del { background:rgba(229,84,74,.15); }
+  .dcell.add { background:rgba(143,191,90,.15); }
+  .dcell.gap { background:rgba(255,255,255,.018); }
+
   ::-webkit-scrollbar { width:10px; height:10px; }
   ::-webkit-scrollbar-thumb { background:var(--line); border-radius:8px; }
   ::-webkit-scrollbar-thumb:hover { background:var(--line-2); }
@@ -108,6 +130,7 @@
       <button data-f="ok">ok</button>
       <button data-f="failed">failed</button>
       <button data-f="timeout">timed&nbsp;out</button>
+      <button id="cmpToggle" class="cmp-toggle" title="Compare two runs side by side">⇄ compare</button>
     </div>
     <div class="runs" id="runs"></div>
   </section>
@@ -126,7 +149,8 @@ const $ = (s) => document.querySelector(s);
 const api = (p) => fetch(p).then((r) => r.json());
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
-let RUNS = [], filter = 'all', activeId = null;
+let RUNS = [], filter = 'all', activeId = null, compareMode = false, sel = [];
+const WELCOME_HTML = document.getElementById('detailEmpty').innerHTML;   // to restore when leaving compare
 
 const statusOf = (r) => r.timed_out ? 'timeout' : r.error ? 'error' : r.ok ? 'ok' : 'failed';
 const STCOL = { ok: 'var(--ok)', failed: 'var(--fail)', error: 'var(--fail)', timeout: 'var(--warn)' };
@@ -159,22 +183,98 @@ function runRow(r) {
   const st = statusOf(r);
   const label = (r.code_preview || r.cmd || '—').split('\n')[0];
   const lang = r.lang || (r.image || 'sh').split(':')[0];
-  return `<div class="run${activeId === r.id ? ' active' : ''}" data-id="${r.id}" style="--st:${STCOL[st]}">
+  const si = sel.indexOf(r.id);
+  const rt = compareMode && si >= 0 ? `<span class="cmp-badge">${si === 0 ? 'A' : 'B'}</span>` : `${r.duration_ms}ms<br />${ago(r.ts)}`;
+  return `<div class="run${activeId === r.id && !compareMode ? ' active' : ''}${si >= 0 ? ' selected' : ''}" data-id="${r.id}" style="--st:${STCOL[st]}">
     <span class="badge">${esc(lang)}</span>
     <div class="mid">
       <div class="cmd">${esc(label)}</div>
       <div class="sub"><span class="st-pill">${STLABEL[st]}</span>${r.timed_out ? '' : ` · exit ${r.exit_code}`}${r.network === 'on' ? ' · net' : ''}</div>
     </div>
-    <div class="rt">${r.duration_ms}ms<br />${ago(r.ts)}</div>
+    <div class="rt">${rt}</div>
   </div>`;
 }
-$('#runs').addEventListener('click', (e) => { const el = e.target.closest('.run'); if (el) openRun(el.dataset.id); });
+$('#runs').addEventListener('click', (e) => {
+  const el = e.target.closest('.run'); if (!el) return;
+  if (compareMode) toggleSelect(el.dataset.id); else openRun(el.dataset.id);
+});
 $('#filters').addEventListener('click', (e) => {
   const b = e.target.closest('[data-f]'); if (!b) return;
   filter = b.dataset.f;
   document.querySelectorAll('#filters button').forEach((x) => x.classList.toggle('on', x.dataset.f === filter));
   renderRuns();
 });
+
+// ── Compare mode ─────────────────────────────────────────────────────────────
+$('#cmpToggle').addEventListener('click', () => {
+  compareMode = !compareMode;
+  $('#cmpToggle').classList.toggle('on', compareMode);
+  sel = [];
+  renderRuns();
+  if (compareMode) comparePrompt();
+  else { document.getElementById('detailEmpty').innerHTML = WELCOME_HTML; if (activeId) openRun(activeId); else showEmpty(); }
+});
+function toggleSelect(id) {
+  const i = sel.indexOf(id);
+  if (i >= 0) sel.splice(i, 1);
+  else { if (sel.length >= 2) sel.shift(); sel.push(id); }
+  renderRuns();
+  if (sel.length === 2) renderDiff(sel[0], sel[1]); else comparePrompt();
+}
+function showEmpty() { $('#detail').hidden = true; document.body.classList.remove('viewing'); document.getElementById('detailEmpty').style.display = ''; }
+function comparePrompt() {
+  $('#detail').hidden = true; document.body.classList.remove('viewing');
+  const e = document.getElementById('detailEmpty'); e.style.display = '';
+  const need = 2 - sel.length;
+  e.innerHTML = `<div class="big">⇄</div>
+    <div style="color:var(--txt);font-size:16px;font-weight:600;margin-bottom:6px">Compare two runs</div>
+    <div>Select ${need} more run${need === 1 ? '' : 's'} from the list to diff their code, output, exit status and limits.</div>`;
+}
+async function renderDiff(idA, idB) {
+  const d = await api('/api/diff?a=' + encodeURIComponent(idA) + '&b=' + encodeURIComponent(idB));
+  if (d.error) return;
+  document.getElementById('detailEmpty').style.display = 'none';
+  document.body.classList.add('viewing');
+  const el = $('#detail'); el.hidden = false; el.style.removeProperty('--st');
+  el.innerHTML = diffView(d);
+}
+function runHeadCol(r, label) {
+  const st = statusOf(r); const lang = r.lang || (r.image || 'sh').split(':')[0];
+  return `<div class="dcol-head" style="--st:${STCOL[st]}">
+    <span class="cmp-badge">${label}</span>
+    <span class="d-status" style="--st:${STCOL[st]}">${STLABEL[st].toUpperCase()}</span>
+    <span class="dh-t">${esc(lang)} · exit ${r.timed_out ? '—' : r.exit_code} · ${r.duration_ms}ms</span>
+  </div>`;
+}
+function diffChips(a, b) {
+  const rows = [
+    ['exit', a.timed_out ? '—' : a.exit_code, b.timed_out ? '—' : b.exit_code],
+    ['took', a.duration_ms + 'ms', b.duration_ms + 'ms'],
+    ['network', a.network || 'none', b.network || 'none'],
+    ['mem', a.mem || '—', b.mem || '—'],
+    ['cpus', a.cpus || '—', b.cpus || '—'],
+  ];
+  return `<div class="chips">${rows.map(([k, va, vb]) => {
+    const diff = String(va) !== String(vb);
+    return `<span class="chip ${diff ? 'diffchip' : ''}">${k} <b>${esc(va)}</b>${diff ? ` → <b>${esc(vb)}</b>` : ''}</span>`;
+  }).join('')}</div>`;
+}
+function diffSection(title, ld) {
+  if (!ld.rows.some((x) => x.l != null || x.r != null)) return '';   // both sides empty
+  const badge = ld.identical ? '<span class="bytes">identical</span>' : `<span class="bytes">${ld.changed} line${ld.changed === 1 ? '' : 's'} differ</span>`;
+  return `<div class="sect-l">${title} ${badge}</div>
+    <div class="diff">${ld.rows.map((row) => `<div class="drow">
+      <code class="dcell ${row.lc}">${row.l == null ? '' : (esc(row.l) || ' ')}</code>
+      <code class="dcell ${row.rc}">${row.r == null ? '' : (esc(row.r) || ' ')}</code>
+    </div>`).join('')}</div>`;
+}
+function diffView(d) {
+  return `<div class="d-head diff-head">${runHeadCol(d.a, 'A')}<span class="vs">vs</span>${runHeadCol(d.b, 'B')}</div>
+    ${diffChips(d.a, d.b)}
+    ${diffSection('code', d.diff.code)}
+    ${diffSection('stdout', d.diff.stdout)}
+    ${diffSection('stderr', d.diff.stderr)}`;
+}
 
 // ── Detail ───────────────────────────────────────────────────────────────────
 async function openRun(id) {

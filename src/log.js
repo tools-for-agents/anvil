@@ -68,6 +68,41 @@ export function recentRuns({ limit = 100 } = {}) {
 
 export function getRun(id) { return shape(get(`SELECT * FROM runs WHERE id=?`, id)); }
 
+// LCS line diff → aligned rows [{ l, r, lc, rc }] where l/r are the left/right
+// line (or null for a gap) and lc/rc are 'same' | 'del' | 'add' | 'gap'.
+export function lineDiff(aText, bText) {
+  const a = String(aText || '').split('\n'), b = String(bText || '').split('\n');
+  const n = a.length, m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const rows = [];
+  let i = 0, j = 0, changed = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { rows.push({ l: a[i], r: b[j], lc: 'same', rc: 'same' }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { rows.push({ l: a[i], r: null, lc: 'del', rc: 'gap' }); i++; changed++; }
+    else { rows.push({ l: null, r: b[j], lc: 'gap', rc: 'add' }); j++; changed++; }
+  }
+  while (i < n) { rows.push({ l: a[i], r: null, lc: 'del', rc: 'gap' }); i++; changed++; }
+  while (j < m) { rows.push({ l: null, r: b[j], lc: 'gap', rc: 'add' }); j++; changed++; }
+  return { rows, changed, identical: changed === 0 };
+}
+
+// Compare two logged runs: both records + line diffs of code / stdout / stderr.
+export function diffRuns(idA, idB) {
+  const a = getRun(idA), b = getRun(idB);
+  if (!a || !b) return null;
+  return {
+    a, b,
+    diff: {
+      code: lineDiff(a.code, b.code),
+      stdout: lineDiff(a.stdout, b.stdout),
+      stderr: lineDiff(a.stderr, b.stderr),
+    },
+  };
+}
+
 export function stats() {
   const s = get(`SELECT COUNT(*) n,
                    SUM(CASE WHEN ok=1 THEN 1 ELSE 0 END) ok,
