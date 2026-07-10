@@ -1,8 +1,11 @@
-// anvil tests — run with `node --test`. The preset tests always run; the
-// sandbox tests need Docker and skip cleanly when it isn't available (CI runners
-// have Docker, so they execute there).
+// anvil tests — run with `node --test`. The preset/log/serve tests always run;
+// the sandbox tests need a Docker that can actually *run a container* and skip
+// cleanly otherwise. Note: some CI runners report a docker version but can't run
+// containers (e.g. image-pull rate limits), so probing `docker version` is not
+// enough — we run a throwaway container and only execute the exec tests if it works.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { PRESETS, dockerAvailable, run } from '../src/run.js';
 
 test('PRESETS map languages to images and commands', () => {
@@ -11,7 +14,13 @@ test('PRESETS map languages to images and commands', () => {
   assert.equal(PRESETS.bash.cmd('main.sh'), 'sh main.sh');
 });
 
-const noDocker = !dockerAvailable() && 'docker not available';
+function canRunContainers() {
+  if (!dockerAvailable()) return false;
+  const r = spawnSync('docker', ['run', '--rm', 'alpine:3.20', 'echo', 'anvil-probe'],
+    { encoding: 'utf8', timeout: 90_000 });
+  return r.status === 0 && /anvil-probe/.test(r.stdout || '');
+}
+const noDocker = !canRunContainers() && 'docker cannot run containers in this environment';
 
 test('run executes code and returns structured output', { skip: noDocker }, async () => {
   const r = await run({ lang: 'python', code: 'print(2**10)' });
