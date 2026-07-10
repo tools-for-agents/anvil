@@ -92,6 +92,9 @@
   .run-search:focus { border-color:var(--ember); }
   .run-search::placeholder { color:var(--faint); }
   .run-count { font-family:var(--mono); font-size:10px; color:var(--faint); white-space:nowrap; flex:none; font-variant-numeric:tabular-nums; }
+  .nav-hint { display:flex; align-items:center; gap:3px; flex:none; font-family:var(--mono); font-size:9px; color:var(--faint); user-select:none; }
+  .nav-hint[hidden] { display:none; }
+  .nav-hint b { font-weight:600; background:var(--panel-3); border:1px solid var(--line); border-radius:4px; padding:1px 4px; color:var(--muted); }
   .run .cmd mark, .run .badge mark { background:rgba(255,106,26,.28); color:var(--ember-hot); border-radius:2px; padding:0 1px; }
   .runs { flex:1; overflow:auto; }
   .run {
@@ -195,9 +198,10 @@
       <span class="sr-icon" aria-hidden="true">⌕</span>
       <input id="runSearch" class="run-search" type="text" autocomplete="off" spellcheck="false"
              placeholder="search code · command · lang · output…" aria-label="Search runs" />
+      <span class="nav-hint" id="navHint" title="j / k or ↑ / ↓ to move through the run list" hidden><b>j</b><b>k</b>↕</span>
       <span class="run-count" id="runCount"></span>
     </div>
-    <div class="runs" id="runs"></div>
+    <div class="runs" id="runs" aria-keyshortcuts="j k ArrowDown ArrowUp"></div>
   </section>
 
   <main class="detail-pane">
@@ -329,6 +333,7 @@ function renderCount(shown) {
   const el = $('#runCount'); if (!el) return;
   const total = RUNS.length;
   el.textContent = (query || filter !== 'all') ? `${shown} / ${total}` : `${total} run${total === 1 ? '' : 's'}`;
+  const hint = $('#navHint'); if (hint) hint.hidden = shown < 2;   // the j/k hint only matters with a couple of runs
 }
 function runRow(r) {
   const st = statusOf(r);
@@ -354,6 +359,25 @@ $('#runs').addEventListener('keydown', (e) => {   // keyboard-operable run rows 
   const el = e.target.closest('.run'); if (!el) return;
   e.preventDefault();
   if (compareMode) toggleSelect(el.dataset.id); else openRun(el.dataset.id);
+});
+// Run-list cursor: j / ↓ and k / ↑ move through the visible runs and open each
+// (the .active row is the cursor) — browse the forge log without the mouse.
+document.addEventListener('keydown', (e) => {
+  if (compareMode || !$('#run-modal').hidden) return;                       // compare/modal own their keys
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;                        // don't hijack the search box / code editor
+  const down = e.key === 'j' || e.key === 'ArrowDown';
+  const up = e.key === 'k' || e.key === 'ArrowUp';
+  if (!down && !up) return;
+  const rows = [...document.querySelectorAll('#runs .run')];
+  if (!rows.length) return;
+  e.preventDefault();
+  const idx = rows.findIndex((el) => el.dataset.id === activeId);
+  let next;
+  if (idx === -1) next = down ? 0 : rows.length - 1;                        // nothing open yet → first / last
+  else next = Math.min(rows.length - 1, Math.max(0, idx + (down ? 1 : -1)));
+  const el = rows[next];
+  if (el) { openRun(el.dataset.id); el.scrollIntoView({ block: 'nearest' }); }
 });
 // Re-run: re-execute a logged run, then jump to the new run it produced.
 document.addEventListener('click', async (e) => {

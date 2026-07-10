@@ -52,6 +52,7 @@ A zero-dependency **forge log** of what the sandbox executed:
 - **Re-run** — hit **↻ re-run** on any run to re-execute its exact code and limits in a fresh sandbox; the new run is logged and opened, so you can compare it against the original.
 - **Search** — a live search box filters the log by **code, command, language or captured output** as you type (matches highlighted, with a running `3 / 7` count); `Esc` clears it. Composes with the status filters, so you can find "that `curl` run that failed" in a long history.
 - **Filters + stats** — narrow to failures, see ok/failed counts, average duration, and a **by-language** breakdown of everything the sandbox has run (`python 3 · node 1 · bash 1`).
+- **Keyboard navigation** — press **`j`/`k`** (or **↑/↓**) to move a cursor through the run list and open each run as you go — browse the whole forge log from the keyboard without touching the mouse (it stands down while you're typing in the search box or in compare mode).
 - **Keyboard-accessible** — every control has a visible focus ring, and the run rows open with Tab + Enter (not just the mouse), with aria-labels throughout.
 
 Logging is opt-in, fire-and-forget and fully guarded — it never slows or breaks a run. Try the demo without Docker: `ANVIL_DB=./.anvil/runs.db node scripts/seed.js` then `anvil serve`.
