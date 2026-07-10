@@ -77,6 +77,11 @@
   .chip.net-on { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 40%, transparent); }
   .sect-l { font-family:var(--mono); font-size:10px; color:var(--faint); text-transform:uppercase; letter-spacing:1.4px; margin:20px 0 8px; display:flex; align-items:center; gap:8px; }
   .sect-l .bytes { color:var(--faint); text-transform:none; letter-spacing:0; }
+  .sect-l .copy-btn { margin-left:auto; font-family:var(--mono); font-size:10px; letter-spacing:.4px; text-transform:none;
+    color:var(--faint); background:none; border:1px solid var(--line); border-radius:7px; padding:3px 9px; cursor:pointer;
+    transition:color .12s, border-color .12s, background .12s; }
+  .sect-l .copy-btn:hover { color:var(--ember); border-color:var(--ember); background:rgba(255,106,26,.08); }
+  .sect-l .copy-btn.ok { color:var(--ok); border-color:var(--ok); background:rgba(143,191,90,.1); }
   pre.block { margin:0; font-family:var(--mono); font-size:12.5px; line-height:1.6; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; overflow:auto; max-height:340px; white-space:pre-wrap; word-break:break-word; }
   pre.code { border-left:3px solid var(--ember); }
   pre.stdout { color:var(--txt); }
@@ -319,14 +324,36 @@ async function openRun(id) {
       ${r.timeout_ms ? `<span class="chip">timeout <b>${(r.timeout_ms / 1000)}s</b></span>` : ''}
     </div>
     ${r.error ? `<div class="sect-l">error</div><pre class="block stderr">${esc(r.error)}</pre>` : ''}
-    <div class="sect-l">${r.code ? 'code' : 'command'}</div>
+    <div class="sect-l">${r.code ? 'code' : 'command'} ${(r.code || r.cmd) ? copyBtn() : ''}</div>
     <pre class="block code">${esc(r.code || r.cmd || '—')}</pre>
-    <div class="sect-l">stdout ${r.stdout ? `<span class="bytes">${r.stdout.length} chars</span>` : ''}</div>
+    <div class="sect-l">stdout ${r.stdout ? `<span class="bytes">${r.stdout.length} chars</span>${copyBtn()}` : ''}</div>
     ${r.stdout ? `<pre class="block stdout">${esc(r.stdout)}</pre>` : '<div class="none">— no stdout —</div>'}
-    <div class="sect-l">stderr ${r.stderr ? `<span class="bytes">${r.stderr.length} chars</span>` : ''}</div>
+    <div class="sect-l">stderr ${r.stderr ? `<span class="bytes">${r.stderr.length} chars</span>${copyBtn()}` : ''}</div>
     ${r.stderr ? `<pre class="block stderr">${esc(r.stderr)}</pre>` : '<div class="none">— no stderr —</div>'}`;
   d.parentElement.scrollTop = 0;
 }
+
+// ── Copy code / stdout / stderr to the clipboard ─────────────────────────────
+const copyBtn = () => `<button class="copy-btn" data-copy title="Copy to clipboard">⧉ copy</button>`;
+async function copyText(text, btn) {
+  const label = btn.dataset.label || btn.textContent;
+  btn.dataset.label = label;
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; }
+  catch {
+    try { const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); ta.remove(); } catch {}
+  }
+  btn.textContent = ok ? '✓ copied' : '✗ failed';
+  btn.classList.toggle('ok', ok);
+  clearTimeout(btn._t); btn._t = setTimeout(() => { btn.textContent = label; btn.classList.remove('ok'); }, 1200);
+}
+// the copy button sits in a .sect-l label; the block it copies is the next sibling <pre>
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-copy]'); if (!b) return;
+  const pre = b.closest('.sect-l')?.nextElementSibling;
+  if (pre && pre.classList.contains('block')) copyText(pre.textContent, b);
+});
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function ago(iso) {
