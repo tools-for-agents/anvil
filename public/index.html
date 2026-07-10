@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>anvil · forge log</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='84'>⚒</text></svg>" />
+<style>
+  :root {
+    --bg:#131110; --panel:#1b1917; --panel-2:#232019; --panel-3:#2a2620; --line:#332e28; --line-2:#443d34;
+    --txt:#e8e2d8; --muted:#9a9082; --faint:#6a6157;
+    --ember:#ff6a1a; --ember-hot:#ffcf6b; --ember-glow:rgba(255,106,26,.4);
+    --ok:#8fbf5a; --fail:#e5544a; --warn:#f5a623;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SFMono-Regular","JetBrains Mono",Menlo,monospace;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body {
+    background:
+      radial-gradient(760px 380px at 50% -8%, rgba(255,106,26,.09), transparent 62%),
+      var(--bg);
+    color:var(--txt); font-family:var(--sans); font-size:13.5px; height:100vh; overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    display:grid; grid-template-rows:auto 1fr; grid-template-columns:minmax(340px,420px) 1fr;
+    grid-template-areas:"top top" "list detail";
+  }
+
+  /* ── Top ─────────────────────────────────────────────────── */
+  .top { grid-area:top; display:flex; align-items:center; gap:22px; padding:0 20px; height:58px; border-bottom:1px solid var(--line); background:var(--panel); }
+  .brand { display:flex; align-items:center; gap:11px; }
+  .brand .mk { font-size:22px; color:var(--ember); text-shadow:0 0 14px var(--ember-glow); }
+  .brand b { font-size:16px; letter-spacing:.3px; }
+  .brand .sub { font-family:var(--mono); font-size:10.5px; color:var(--muted); letter-spacing:.4px; }
+  .metrics { display:flex; gap:9px; margin-left:auto; }
+  .metric { font-family:var(--mono); background:var(--panel-2); border:1px solid var(--line); border-radius:9px; padding:6px 12px; text-align:center; min-width:60px; }
+  .metric b { display:block; font-size:16px; font-variant-numeric:tabular-nums; }
+  .metric.ok b { color:var(--ok); } .metric.fail b { color:var(--fail); } .metric.ember b { color:var(--ember); }
+  .metric span { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; }
+
+  /* ── Run list ────────────────────────────────────────────── */
+  .list-pane { grid-area:list; border-right:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; overflow:hidden; }
+  .filters { display:flex; gap:6px; padding:11px 13px; border-bottom:1px solid var(--line); }
+  .filters button { font-family:var(--mono); font-size:11px; background:var(--panel-2); border:1px solid var(--line); color:var(--muted); border-radius:20px; padding:4px 12px; cursor:pointer; transition:color .12s, border-color .12s; }
+  .filters button:hover { color:var(--txt); }
+  .filters button.on { color:var(--ember); border-color:var(--ember); background:rgba(255,106,26,.09); }
+  .runs { flex:1; overflow:auto; }
+  .run {
+    display:grid; grid-template-columns:auto 1fr auto; gap:11px; align-items:center;
+    padding:12px 14px 12px 12px; border-bottom:1px solid var(--line); cursor:pointer; position:relative;
+    border-left:3px solid var(--st); transition:background .1s;
+  }
+  .run:hover { background:var(--panel-2); }
+  .run.active { background:var(--panel-3); }
+  .run .badge { font-family:var(--mono); font-size:10px; font-weight:600; padding:2px 7px; border-radius:5px; background:var(--panel-3); border:1px solid var(--line); color:var(--muted); white-space:nowrap; }
+  .run .mid { min-width:0; }
+  .run .cmd { font-family:var(--mono); font-size:12px; color:var(--txt); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .run .sub { font-size:10.5px; color:var(--faint); margin-top:3px; display:flex; gap:8px; font-family:var(--mono); }
+  .run .rt { text-align:right; font-family:var(--mono); font-size:10.5px; color:var(--muted); white-space:nowrap; }
+  .run .st-pill { color:var(--st); font-weight:600; }
+  .list-empty, .detail-empty { color:var(--muted); text-align:center; padding:60px 24px; }
+  .list-empty .big, .detail-empty .big { font-size:44px; margin-bottom:12px; filter:grayscale(.2); }
+
+  /* ── Detail ──────────────────────────────────────────────── */
+  .detail-pane { grid-area:detail; overflow:auto; position:relative; }
+  .detail { padding:22px 26px 80px; max-width:900px; }
+  .d-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+  .d-status { font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:.5px; padding:4px 12px; border-radius:8px; color:var(--st); background:color-mix(in srgb, var(--st) 15%, transparent); border:1px solid color-mix(in srgb, var(--st) 45%, transparent); }
+  .d-title { font-family:var(--mono); font-size:15px; color:var(--txt); }
+  .d-when { margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--muted); }
+  .chips { display:flex; gap:7px; flex-wrap:wrap; margin:14px 0 20px; }
+  .chip { font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:7px; padding:4px 10px; }
+  .chip b { color:var(--txt); font-weight:600; }
+  .chip.net-on { color:var(--warn); border-color:color-mix(in srgb, var(--warn) 40%, transparent); }
+  .sect-l { font-family:var(--mono); font-size:10px; color:var(--faint); text-transform:uppercase; letter-spacing:1.4px; margin:20px 0 8px; display:flex; align-items:center; gap:8px; }
+  .sect-l .bytes { color:var(--faint); text-transform:none; letter-spacing:0; }
+  pre.block { margin:0; font-family:var(--mono); font-size:12.5px; line-height:1.6; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; overflow:auto; max-height:340px; white-space:pre-wrap; word-break:break-word; }
+  pre.code { border-left:3px solid var(--ember); }
+  pre.stdout { color:var(--txt); }
+  pre.stderr { color:#f0b8b0; border-left:3px solid var(--fail); }
+  .none { color:var(--faint); font-family:var(--mono); font-size:12px; font-style:italic; }
+
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb { background:var(--line); border-radius:8px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--line-2); }
+  @media (max-width:820px) { body { grid-template-columns:1fr; grid-template-areas:"top" "list"; } .detail-pane { display:none; } body.viewing { grid-template-areas:"top" "detail"; } body.viewing .list-pane { display:none; } body.viewing .detail-pane { display:block; } }
+</style>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mk">⚒</span><div><b>anvil</b> <span class="sub">forge log · sandbox runs</span></div></div>
+    <div class="metrics" id="metrics"></div>
+  </header>
+
+  <section class="list-pane">
+    <div class="filters" id="filters">
+      <button data-f="all" class="on">all</button>
+      <button data-f="ok">ok</button>
+      <button data-f="failed">failed</button>
+      <button data-f="timeout">timed&nbsp;out</button>
+    </div>
+    <div class="runs" id="runs"></div>
+  </section>
+
+  <main class="detail-pane">
+    <div class="detail" id="detail" hidden></div>
+    <div class="detail-empty" id="detailEmpty">
+      <div class="big">⚒</div>
+      <div style="color:var(--txt);font-size:16px;font-weight:600;margin-bottom:6px">Pick a run to inspect it</div>
+      <div>Every sandbox execution — its code, output, exit status and resource limits — recorded for review.</div>
+    </div>
+  </main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const api = (p) => fetch(p).then((r) => r.json());
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+let RUNS = [], filter = 'all', activeId = null;
+
+const statusOf = (r) => r.timed_out ? 'timeout' : r.error ? 'error' : r.ok ? 'ok' : 'failed';
+const STCOL = { ok: 'var(--ok)', failed: 'var(--fail)', error: 'var(--fail)', timeout: 'var(--warn)' };
+const STLABEL = { ok: 'ok', failed: 'failed', error: 'error', timeout: 'timeout' };
+
+// ── Boot ─────────────────────────────────────────────────────────────────────
+(async () => {
+  const [stats, runs] = await Promise.all([api('/api/stats'), api('/api/runs?limit=200')]);
+  RUNS = runs.runs;
+  renderMetrics(stats); renderRuns();
+})();
+
+function renderMetrics(s) {
+  $('#metrics').innerHTML = [
+    ['ember', s.runs, 'runs'],
+    ['ok', s.ok, 'ok'],
+    ['fail', s.failed, 'failed'],
+    ['', s.avg_ms + 'ms', 'avg'],
+  ].map(([c, v, l]) => `<div class="metric ${c}"><b>${v}</b><span>${l}</span></div>`).join('');
+}
+
+// ── Run list ─────────────────────────────────────────────────────────────────
+function renderRuns() {
+  const rows = RUNS.filter((r) => filter === 'all' || statusOf(r) === filter ||
+    (filter === 'failed' && statusOf(r) === 'error'));
+  if (!rows.length) { $('#runs').innerHTML = `<div class="list-empty"><div class="big">⚒</div><div>The forge is cold — no ${filter === 'all' ? '' : filter + ' '}runs yet.</div></div>`; return; }
+  $('#runs').innerHTML = rows.map(runRow).join('');
+}
+function runRow(r) {
+  const st = statusOf(r);
+  const label = (r.code_preview || r.cmd || '—').split('\n')[0];
+  const lang = r.lang || (r.image || 'sh').split(':')[0];
+  return `<div class="run${activeId === r.id ? ' active' : ''}" data-id="${r.id}" style="--st:${STCOL[st]}">
+    <span class="badge">${esc(lang)}</span>
+    <div class="mid">
+      <div class="cmd">${esc(label)}</div>
+      <div class="sub"><span class="st-pill">${STLABEL[st]}</span>${r.timed_out ? '' : ` · exit ${r.exit_code}`}${r.network === 'on' ? ' · net' : ''}</div>
+    </div>
+    <div class="rt">${r.duration_ms}ms<br />${ago(r.ts)}</div>
+  </div>`;
+}
+$('#runs').addEventListener('click', (e) => { const el = e.target.closest('.run'); if (el) openRun(el.dataset.id); });
+$('#filters').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-f]'); if (!b) return;
+  filter = b.dataset.f;
+  document.querySelectorAll('#filters button').forEach((x) => x.classList.toggle('on', x.dataset.f === filter));
+  renderRuns();
+});
+
+// ── Detail ───────────────────────────────────────────────────────────────────
+async function openRun(id) {
+  activeId = id;
+  document.querySelectorAll('.run').forEach((el) => el.classList.toggle('active', el.dataset.id === id));
+  const r = await api('/api/run?id=' + encodeURIComponent(id));
+  if (r.error && !('exit_code' in r)) return;
+  const st = statusOf(r);
+  const lang = r.lang || (r.image || 'sh').split(':')[0];
+  $('#detailEmpty').style.display = 'none';
+  document.body.classList.add('viewing');
+  const d = $('#detail'); d.hidden = false; d.style.setProperty('--st', STCOL[st]);
+  d.innerHTML = `
+    <div class="d-head">
+      <span class="d-status" style="--st:${STCOL[st]}">${STLABEL[st].toUpperCase()}</span>
+      <span class="d-title">${esc(lang)} · ${esc(r.image || '')}</span>
+      <span class="d-when">${new Date(r.ts).toLocaleString()}</span>
+    </div>
+    <div class="chips">
+      <span class="chip">exit <b>${r.timed_out ? '—' : r.exit_code}</b></span>
+      <span class="chip">took <b>${r.duration_ms}ms</b></span>
+      <span class="chip ${r.network === 'on' ? 'net-on' : ''}">network <b>${esc(r.network || 'none')}</b></span>
+      ${r.mem ? `<span class="chip">mem <b>${esc(r.mem)}</b></span>` : ''}
+      ${r.cpus ? `<span class="chip">cpus <b>${esc(r.cpus)}</b></span>` : ''}
+      ${r.timeout_ms ? `<span class="chip">timeout <b>${(r.timeout_ms / 1000)}s</b></span>` : ''}
+    </div>
+    ${r.error ? `<div class="sect-l">error</div><pre class="block stderr">${esc(r.error)}</pre>` : ''}
+    <div class="sect-l">${r.code ? 'code' : 'command'}</div>
+    <pre class="block code">${esc(r.code || r.cmd || '—')}</pre>
+    <div class="sect-l">stdout ${r.stdout ? `<span class="bytes">${r.stdout.length} chars</span>` : ''}</div>
+    ${r.stdout ? `<pre class="block stdout">${esc(r.stdout)}</pre>` : '<div class="none">— no stdout —</div>'}
+    <div class="sect-l">stderr ${r.stderr ? `<span class="bytes">${r.stderr.length} chars</span>` : ''}</div>
+    ${r.stderr ? `<pre class="block stderr">${esc(r.stderr)}</pre>` : '<div class="none">— no stderr —</div>'}`;
+  d.parentElement.scrollTop = 0;
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+function ago(iso) {
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+</script>
+</body>
+</html>

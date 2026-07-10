@@ -4,6 +4,7 @@
 //   anvil sh '<command>'                    run a shell command in alpine
 //   echo '<code>' | anvil run python -      read code from stdin
 //   anvil check                             docker availability + presets
+//   anvil serve [--port 7930]               run-history dashboard (needs ANVIL_DB)
 import { run, dockerAvailable, PRESETS } from './run.js';
 import { readFileSync } from 'node:fs';
 
@@ -21,6 +22,12 @@ function printResult(r) {
 (async () => {
   if (cmd === 'check') {
     return out({ docker: dockerAvailable() || 'unavailable', presets: Object.keys(PRESETS) });
+  }
+  if (cmd === 'serve') {
+    const i = rest.indexOf('--port');
+    const port = i >= 0 ? +rest[i + 1] : (process.env.ANVIL_PORT || 7930);
+    const { serve } = await import('./server.js');
+    return serve({ port });
   }
   if (cmd === 'sh') {
     const command = rest.join(' ');

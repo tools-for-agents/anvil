@@ -24,6 +24,13 @@ export function dockerAvailable() {
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
+// Opt-in run logging: when ANVIL_DB is set, record the run for `anvil serve`.
+// Fire-and-forget and fully guarded — logging must never break or slow a run.
+function maybeLog(opts, result) {
+  if (!process.env.ANVIL_DB) return;
+  import('./log.js').then((m) => { try { m.logRun({ opts, result }); } catch {} }).catch(() => {});
+}
+
 function safeJoin(base, rel) {
   const p = normalize(join(base, rel));
   if (isAbsolute(rel) || !p.startsWith(base)) throw new Error(`unsafe file path: ${rel}`);
@@ -73,6 +80,7 @@ export function run(opts = {}) {
     if (secure) args.push('--read-only', '--tmpfs', '/tmp:rw,size=64m');
     args.push(image, '/bin/sh', '-c', cmd);
 
+    const logOpts = { lang: opts.lang, code, cmd, image, network, mem, cpus, timeout_ms };
     const started = Date.now();
     const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '', outTrunc = false, errTrunc = false, timedOut = false;
@@ -95,7 +103,7 @@ export function run(opts = {}) {
     child.on('close', (codeNum) => {
       clearTimeout(killer);
       rmSync(work, { recursive: true, force: true });
-      resolveP({
+      const result = {
         ok: !timedOut && codeNum === 0,
         exit_code: timedOut ? null : codeNum,
         timed_out: timedOut,
@@ -103,12 +111,16 @@ export function run(opts = {}) {
         image,
         stdout: out.slice(0, MAX_OUTPUT) + (outTrunc ? '\n…[truncated]' : ''),
         stderr: err.slice(0, MAX_OUTPUT) + (errTrunc ? '\n…[truncated]' : ''),
-      });
+      };
+      maybeLog(logOpts, result);
+      resolveP(result);
     });
     child.on('error', (e) => {
       clearTimeout(killer);
       rmSync(work, { recursive: true, force: true });
-      resolveP({ ok: false, error: `failed to start docker: ${e.message}` });
+      const result = { ok: false, error: `failed to start docker: ${e.message}`, duration_ms: Date.now() - started };
+      maybeLog(logOpts, result);
+      resolveP(result);
     });
   });
 }

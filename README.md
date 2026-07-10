@@ -31,6 +31,24 @@ echo 'print("hi")' | node src/cli.js run python -
 node src/cli.js sh 'apk info 2>/dev/null | head'
 ```
 
+## Run history (`anvil serve`)
+
+anvil is stateless by default. Set **`ANVIL_DB`** to record every run, then browse them in a dashboard:
+
+```bash
+export ANVIL_DB=./.anvil/runs.db          # opt in to the run log
+node src/cli.js run python 'print(2**10)'  # …runs are now recorded
+node src/cli.js serve                       # → http://localhost:7930  (--port to change)
+```
+
+A zero-dependency **forge log** of what the sandbox executed:
+
+- **Run list** — every execution with its language, status (ok / failed / timed out), exit code and duration, colour-coded at a glance.
+- **Run detail** — the exact code or command, full **stdout** and **stderr**, and the resource limits it ran under (network, memory, cpus, timeout).
+- **Filters + stats** — narrow to failures, see ok/failed counts and average duration.
+
+Logging is opt-in, fire-and-forget and fully guarded — it never slows or breaks a run. Try the demo without Docker: `ANVIL_DB=./.anvil/runs.db node scripts/seed.js` then `anvil serve`.
+
 ## MCP server (for agents)
 
 ```jsonc
