@@ -72,6 +72,11 @@
   #rm-code { width:100%; min-height:180px; resize:vertical; box-sizing:border-box; font-family:var(--mono); font-size:12.5px;
     line-height:1.6; color:var(--txt); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px 14px; outline:none; }
   #rm-code:focus { border-color:var(--ember); }
+  /* ── Accessibility: a visible focus ring for keyboard users on every control ── */
+  :focus-visible { outline:2px solid var(--ember); outline-offset:2px; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible,
+  #rm-code:focus-visible { outline:2px solid var(--ember); outline-offset:1px; }   /* #id beats the textarea's outline:none */
+  .run:focus-visible { outline-offset:-2px; }
   .rm-err { margin-top:9px; font-family:var(--mono); font-size:11.5px; color:var(--fail); }
   .rm-err[hidden] { display:none; }
   .rm-foot { display:flex; align-items:center; gap:12px; margin-top:14px; }
@@ -293,7 +298,7 @@ function runRow(r) {
   const lang = r.lang || (r.image || 'sh').split(':')[0];
   const si = sel.indexOf(r.id);
   const rt = compareMode && si >= 0 ? `<span class="cmp-badge">${si === 0 ? 'A' : 'B'}</span>` : `${r.duration_ms}ms<br />${ago(r.ts)}`;
-  return `<div class="run${activeId === r.id && !compareMode ? ' active' : ''}${si >= 0 ? ' selected' : ''}" data-id="${r.id}" style="--st:${STCOL[st]}">
+  return `<div class="run${activeId === r.id && !compareMode ? ' active' : ''}${si >= 0 ? ' selected' : ''}" data-id="${r.id}" style="--st:${STCOL[st]}" tabindex="0" role="button" aria-label="Run: ${esc(label)} — ${STLABEL[st]}">
     <span class="badge">${esc(lang)}</span>
     <div class="mid">
       <div class="cmd">${esc(label)}</div>
@@ -304,6 +309,12 @@ function runRow(r) {
 }
 $('#runs').addEventListener('click', (e) => {
   const el = e.target.closest('.run'); if (!el) return;
+  if (compareMode) toggleSelect(el.dataset.id); else openRun(el.dataset.id);
+});
+$('#runs').addEventListener('keydown', (e) => {   // keyboard-operable run rows (Enter / Space)
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('.run'); if (!el) return;
+  e.preventDefault();
   if (compareMode) toggleSelect(el.dataset.id); else openRun(el.dataset.id);
 });
 // Re-run: re-execute a logged run, then jump to the new run it produced.
