@@ -55,11 +55,18 @@ const api = {
 };
 
 const EXEC_LANGS = new Set(['bash', 'sh', 'node', 'javascript', 'python']);
+const MAX_BODY = 512 * 1024;
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let data = '', size = 0;
-    req.on('data', (c) => { size += c.length; if (size > 262144) { reject(new Error('body too large')); req.destroy(); } else data += c; });
-    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { reject(new Error('invalid JSON body')); } });
+    let data = '', size = 0, over = false;
+    // Drain rather than destroy: killing the socket gives the caller an ECONNRESET
+    // instead of a reason. Stop accumulating, then reject at the end so the handler
+    // can answer with something a human can read.
+    req.on('data', (c) => { size += c.length; if (size > MAX_BODY) { over = true; return; } data += c; });
+    req.on('end', () => {
+      if (over) return reject(new Error('body too large'));
+      try { resolve(data ? JSON.parse(data) : {}); } catch { reject(new Error('invalid JSON body')); }
+    });
     req.on('error', reject);
   });
 }
@@ -135,6 +142,29 @@ export function createAnvilServer() {
           opts.mount = mount;
         }
         if (body.secure === true) opts.secure = true;   // read-only rootfs + tmpfs /tmp
+
+        // Fixture files, written into /work beside the snippet before it runs — so
+        // you can test code against data, or a module against its test. run() already
+        // refuses traversal (safeJoin); refuse it here too, with a readable reason,
+        // and cap the payload so the form can't hand the sandbox a filesystem.
+        if (body.files && typeof body.files === 'object') {
+          const files = {};
+          let total = 0;
+          for (const [rel, content] of Object.entries(body.files)) {
+            const name = String(rel).trim();
+            if (!name) continue;
+            if (isAbsolute(name) || name.split('/').includes('..')) {
+              return json(res, 400, { error: `file path must stay inside the sandbox: ${name}` });
+            }
+            const text = String(content ?? '');
+            total += name.length + text.length;
+            files[name] = text;
+          }
+          if (Object.keys(files).length > 12) return json(res, 400, { error: 'at most 12 files' });
+          if (total > 128 * 1024) return json(res, 400, { error: 'files are too large (128KB max)' });
+          if (Object.keys(files).length) opts.files = files;
+        }
+        if (typeof body.stdin === 'string' && body.stdin.length) opts.stdin = body.stdin;
         // resource profile from the new-run form's preset picker — validated so a
         // malformed value can't reach the docker flags (falls back to run() defaults)
         if (typeof body.mem === 'string' && /^\d{1,5}m$/.test(body.mem)) opts.mem = body.mem;

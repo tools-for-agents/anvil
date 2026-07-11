@@ -98,3 +98,28 @@ test('a command runs in any image, not just the language presets', { skip: noDoc
   assert.match(r.stdout, /from-a-command/);
   assert.match(r.stdout, /Linux/);
 });
+
+test('a snippet can be run against fixture files, and stdin', { skip: noDocker }, async () => {
+  // the point of files: run code AGAINST something, not just on its own
+  const r = await run({
+    lang: 'python',
+    code: 'import json\nd = json.load(open("data.json"))\nprint(d["kind"], len(d["items"]))',
+    files: { 'data.json': JSON.stringify({ kind: 'fixture', items: [1, 2, 3] }) },
+  });
+  assert.equal(r.exit_code, 0, r.stderr);
+  assert.match(r.stdout, /fixture 3/, 'the code read the file that was written beside it');
+
+  // a module against its test — the case that makes this worth having
+  const t = await run({
+    lang: 'bash',
+    code: 'node -e "const {add}=require(\'./m.js\'); if(add(2,3)!==5) { console.error(\'FAIL\'); process.exit(1) } console.log(\'PASS\')"',
+    image: 'node:22-alpine',
+    files: { 'm.js': 'module.exports.add = (a, b) => a + b;\n' },
+  });
+  assert.equal(t.exit_code, 0, t.stderr);
+  assert.match(t.stdout, /PASS/);
+
+  // stdin is piped to the process
+  const s = await run({ lang: 'bash', code: 'cat | tr a-z A-Z', stdin: 'shout this' });
+  assert.match(s.stdout, /SHOUT THIS/);
+});

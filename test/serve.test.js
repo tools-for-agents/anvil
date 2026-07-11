@@ -241,3 +241,36 @@ test('serve: /api/exec guards the mount, the image and the command before anythi
     assert.match((await noCmd.json()).error, /cmd is required/);
   } finally { server.close(); }
 });
+
+test('serve: fixture files are guarded before anything runs', async () => {
+  const server = createAnvilServer();
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://localhost:${server.address().port}`;
+  const post = (body) => fetch(base + '/api/exec', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  try {
+    // a file must not be able to climb out of the sandbox
+    const up = await post({ lang: 'bash', code: 'ls', files: { '../escape.txt': 'x' } });
+    assert.equal(up.status, 400);
+    assert.match((await up.json()).error, /inside the sandbox/);
+
+    const abs = await post({ lang: 'bash', code: 'ls', files: { '/etc/passwd': 'x' } });
+    assert.equal(abs.status, 400);
+
+    // and it cannot hand the sandbox a filesystem
+    const many = Object.fromEntries(Array.from({ length: 13 }, (_, i) => [`f${i}.txt`, 'x']));
+    const tooMany = await post({ lang: 'bash', code: 'ls', files: many });
+    assert.equal(tooMany.status, 400);
+    assert.match((await tooMany.json()).error, /at most 12 files/);
+
+    const huge = await post({ lang: 'bash', code: 'ls', files: { 'big.txt': 'x'.repeat(200 * 1024) } });
+    assert.equal(huge.status, 400);
+    assert.match((await huge.json()).error, /too large/);
+
+    // a body past the hard cap gets a readable error, not a severed connection
+    const monstrous = await post({ lang: 'bash', code: 'x'.repeat(600 * 1024) });
+    assert.equal(monstrous.status, 400);
+    assert.match((await monstrous.json()).error, /body too large/);
+  } finally { server.close(); }
+});

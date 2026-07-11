@@ -87,6 +87,23 @@
   .rm-text::placeholder { color:var(--faint); }
   .rm-text[hidden] { display:none; }
   .rm-mountrow { margin-bottom:10px; }
+  /* fixture files: run code against data, or a module against its test */
+  .rm-extras { display:flex; align-items:center; gap:7px; margin-top:9px; }
+  .rm-add { font-family:var(--mono); font-size:10.5px; color:var(--muted); background:var(--panel-2);
+    border:1px solid var(--line); border-radius:20px; padding:3px 10px; cursor:pointer; }
+  .rm-add:hover { color:var(--ember); border-color:var(--ember); }
+  .rm-extras-h { font-family:var(--mono); font-size:10px; color:var(--faint); margin-left:auto; }
+  .rm-extras-h code { color:var(--muted); }
+  .rm-file, #rm-stdinwrap { margin-top:9px; border:1px solid var(--line); border-radius:9px; overflow:hidden; background:var(--bg); }
+  #rm-stdinwrap[hidden] { display:none; }
+  .rm-fh { display:flex; align-items:center; gap:6px; padding:5px 7px; background:var(--panel-2); border-bottom:1px solid var(--line); }
+  .rm-fh input, .rm-fn { flex:1; min-width:0; font-family:var(--mono); font-size:11px; color:var(--txt);
+    background:none; border:none; outline:none; padding:1px 3px; }
+  .rm-fn { color:var(--muted); }
+  .rm-del { flex:none; background:none; border:none; color:var(--faint); cursor:pointer; font-size:12px; padding:0 4px; }
+  .rm-del:hover { color:var(--fail); }
+  .rm-fc { width:100%; min-height:64px; resize:vertical; box-sizing:border-box; font-family:var(--mono); font-size:12px;
+    line-height:1.5; color:var(--txt); background:var(--bg); border:none; outline:none; padding:8px 10px; display:block; }
   #rm-code { width:100%; min-height:180px; resize:vertical; box-sizing:border-box; font-family:var(--mono); font-size:12.5px;
     line-height:1.6; color:var(--txt); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px 14px; outline:none; }
   #rm-code:focus { border-color:var(--ember); }
@@ -277,6 +294,16 @@
         <input id="rm-mount" class="rm-text" placeholder="mount a host dir read-only at /repo (optional, absolute path)" aria-label="Mount a host directory" autocomplete="off" spellcheck="false" />
       </div>
       <textarea id="rm-code" spellcheck="false" autocomplete="off" placeholder="print(sum(range(1, 101)))"></textarea>
+      <div class="rm-extras">
+        <button type="button" class="rm-add" id="rm-addfile">＋ file</button>
+        <button type="button" class="rm-add" id="rm-addstdin">＋ stdin</button>
+        <span class="rm-extras-h">files land beside your code in <code>/work</code></span>
+      </div>
+      <div id="rm-files"></div>
+      <div id="rm-stdinwrap" hidden>
+        <div class="rm-fh"><span class="rm-fn">stdin</span><button type="button" class="rm-del" data-delstdin aria-label="Remove stdin">✕</button></div>
+        <textarea id="rm-stdin" class="rm-fc" spellcheck="false" placeholder="piped to the process on stdin"></textarea>
+      </div>
       <div class="rm-err" id="rm-err" hidden></div>
       <div class="rm-foot">
         <span class="rm-hint" id="rm-hint">throwaway container · network off · 512m · 1 cpu · 30s</span>
@@ -347,10 +374,47 @@ $('#rm-modes').addEventListener('click', (e) => {
   const b = e.target.closest('[data-mode]'); if (b) setRunMode(b.dataset.mode);
 });
 
+// Fixture files. run() has always taken { path: content } and written them into
+// /work beside your code — the MCP tool offers it, the form never did. So the
+// dashboard could run a snippet, but never run a snippet AGAINST something: a
+// module against its test, a parser against a sample payload.
+let fileSeq = 0;
+function addFile(name = '', content = '') {
+  const id = ++fileSeq;
+  const el = document.createElement('div');
+  el.className = 'rm-file';
+  el.innerHTML = `<div class="rm-fh">
+      <input class="rm-fname" placeholder="data.json" value="${esc(name)}" spellcheck="false" autocomplete="off" aria-label="File name" />
+      <button type="button" class="rm-del" data-delfile="${id}" aria-label="Remove file">✕</button>
+    </div>
+    <textarea class="rm-fc rm-fbody" spellcheck="false" placeholder="file contents" aria-label="File contents">${esc(content)}</textarea>`;
+  el.dataset.fid = id;
+  $('#rm-files').appendChild(el);
+  el.querySelector('.rm-fname').focus();
+}
+function collectFiles() {
+  const files = {};
+  for (const el of document.querySelectorAll('#rm-files .rm-file')) {
+    const name = el.querySelector('.rm-fname').value.trim();
+    if (!name) continue;                       // an unnamed file is not a file
+    files[name] = el.querySelector('.rm-fbody').value;
+  }
+  return files;
+}
+$('#rm-addfile').addEventListener('click', () => addFile());
+$('#rm-addstdin').addEventListener('click', () => { $('#rm-stdinwrap').hidden = false; $('#rm-stdin').focus(); });
+$('#run-modal').addEventListener('click', (e) => {
+  const df = e.target.closest('[data-delfile]');
+  if (df) { df.closest('.rm-file').remove(); return; }
+  if (e.target.closest('[data-delstdin]')) { $('#rm-stdinwrap').hidden = true; $('#rm-stdin').value = ''; }
+});
+
 function openRunModal() {
   $('#run-modal').hidden = false; $('#rm-err').hidden = true;
   applyPreset('default'); setRunMode('code');
   $('#rm-mount').value = ''; $('#rm-image').value = ''; $('#rm-secure').checked = false;
+  $('#rm-files').innerHTML = '';                       // a fresh run starts with no fixtures
+  $('#rm-stdinwrap').hidden = true; $('#rm-stdin').value = '';
   setTimeout(() => $('#rm-code').focus(), 30);
 }
 function closeRunModal() { $('#run-modal').hidden = true; }
@@ -408,6 +472,8 @@ async function submitRun() {
         ...(runMode === 'command' ? { image: $('#rm-image').value.trim(), cmd: code } : { lang, code }),
         mount: $('#rm-mount').value.trim() || undefined,
         secure: $('#rm-secure').checked,
+        files: collectFiles(),
+        stdin: $('#rm-stdinwrap').hidden ? undefined : $('#rm-stdin').value,
         network: $('#rm-net').checked ? 'on' : 'none',
         mem: runProfile.mem, cpus: runProfile.cpus, timeout_ms: runProfile.timeout_ms,
       }) });
