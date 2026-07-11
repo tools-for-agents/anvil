@@ -71,3 +71,30 @@ test('a listener that throws cannot take the run down with it', { skip: noDocker
   assert.equal(r.ok, true, 'the run still completes');
   assert.match(r.stdout, /alive/);
 });
+
+test('a mounted repo is visible at /repo — and read-only', { skip: noDocker }, async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const repo = mkdtempSync(join(tmpdir(), 'anvil-repo-'));
+  writeFileSync(join(repo, 'package.json'), '{"name":"the-repo"}\n');
+
+  // this is anvil's headline trick: verify a real repo without copying it anywhere
+  const seen = await run({ lang: 'bash', code: 'cat /repo/package.json', mount: repo });
+  assert.equal(seen.exit_code, 0);
+  assert.match(seen.stdout, /the-repo/, 'the sandbox can read the mounted repo');
+
+  // …and cannot touch it. A sandbox that can write to your repo is not a sandbox.
+  const wrote = await run({ lang: 'bash', code: 'echo pwned > /repo/package.json; echo done', mount: repo });
+  assert.match(wrote.stderr + wrote.stdout, /Read-only|Permission denied|cannot create/i,
+    'writing to the mount is refused');
+  const { readFileSync } = await import('node:fs');
+  assert.match(readFileSync(join(repo, 'package.json'), 'utf8'), /the-repo/, 'the host file is untouched');
+});
+
+test('a command runs in any image, not just the language presets', { skip: noDocker }, async () => {
+  const r = await run({ image: 'alpine:3.20', cmd: 'echo from-a-command && uname -s' });
+  assert.equal(r.exit_code, 0);
+  assert.match(r.stdout, /from-a-command/);
+  assert.match(r.stdout, /Linux/);
+});

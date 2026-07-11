@@ -75,7 +75,18 @@
   .rm-row { display:flex; align-items:center; gap:14px; margin-bottom:10px; }
   #rm-lang { font-family:var(--mono); font-size:12px; color:var(--txt); background:var(--panel-2); border:1px solid var(--line);
     border-radius:8px; padding:6px 10px; cursor:pointer; }
-  .rm-net { font-family:var(--mono); font-size:11.5px; color:var(--muted); display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+  .rm-net { font-family:var(--mono); font-size:11.5px; color:var(--muted); display:inline-flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap; }
+  .rm-modes { display:flex; gap:6px; margin-bottom:12px; }
+  .rm-mode { font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line);
+    border-radius:20px; padding:4px 12px; cursor:pointer; transition:color .12s, border-color .12s, background .12s; }
+  .rm-mode:hover { color:var(--txt); }
+  .rm-mode.on { color:var(--ember); border-color:var(--ember); background:rgba(255,106,26,.1); }
+  .rm-text { flex:1; min-width:0; font-family:var(--mono); font-size:12px; color:var(--txt); background:var(--panel-2);
+    border:1px solid var(--line); border-radius:8px; padding:6px 10px; outline:none; }
+  .rm-text:focus { border-color:var(--ember); }
+  .rm-text::placeholder { color:var(--faint); }
+  .rm-text[hidden] { display:none; }
+  .rm-mountrow { margin-bottom:10px; }
   #rm-code { width:100%; min-height:180px; resize:vertical; box-sizing:border-box; font-family:var(--mono); font-size:12.5px;
     line-height:1.6; color:var(--txt); background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px 14px; outline:none; }
   #rm-code:focus { border-color:var(--ember); }
@@ -248,13 +259,22 @@
         <button type="button" class="rm-preset on" data-preset="default" title="network off · 512m · 1 cpu · 30s">⚙ default</button>
         <button type="button" class="rm-preset" data-preset="networked" title="network on · 512m · 1 cpu · 60s">🌐 networked</button>
       </div>
+      <div class="rm-modes" id="rm-modes" role="group" aria-label="Run mode">
+        <button type="button" class="rm-mode on" data-mode="code">snippet</button>
+        <button type="button" class="rm-mode" data-mode="command">command in an image</button>
+      </div>
       <div class="rm-row">
         <select id="rm-lang" aria-label="Language">
           <option value="python">python</option>
           <option value="node">node</option>
           <option value="bash">bash</option>
         </select>
+        <input id="rm-image" class="rm-text" hidden placeholder="image — e.g. node:22-alpine" aria-label="Docker image" autocomplete="off" spellcheck="false" />
         <label class="rm-net"><input type="checkbox" id="rm-net" /> allow network</label>
+        <label class="rm-net"><input type="checkbox" id="rm-secure" /> read-only rootfs</label>
+      </div>
+      <div class="rm-row rm-mountrow">
+        <input id="rm-mount" class="rm-text" placeholder="mount a host dir read-only at /repo (optional, absolute path)" aria-label="Mount a host directory" autocomplete="off" spellcheck="false" />
       </div>
       <textarea id="rm-code" spellcheck="false" autocomplete="off" placeholder="print(sum(range(1, 101)))"></textarea>
       <div class="rm-err" id="rm-err" hidden></div>
@@ -309,7 +329,30 @@ $('#rm-net').addEventListener('change', () => {   // manual network toggle overr
   runProfile.network = $('#rm-net').checked ? 'on' : 'none';
   updateRunHint();
 });
-function openRunModal() { $('#run-modal').hidden = false; $('#rm-err').hidden = true; applyPreset('default'); setTimeout(() => $('#rm-code').focus(), 30); }
+// Two ways to run. A snippet is a language preset; a command is any image — which
+// is what lets you point the sandbox at a real repo and run its test suite,
+// without the repo ever leaving your disk (it mounts read-only at /repo).
+let runMode = 'code';
+function setRunMode(m) {
+  runMode = m;
+  document.querySelectorAll('#rm-modes .rm-mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+  const cmd = m === 'command';
+  $('#rm-lang').hidden = cmd;
+  $('#rm-image').hidden = !cmd;
+  $('#rm-code').placeholder = cmd
+    ? 'command — e.g. cd /repo && npm test'
+    : 'print(sum(range(1, 101)))';
+}
+$('#rm-modes').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mode]'); if (b) setRunMode(b.dataset.mode);
+});
+
+function openRunModal() {
+  $('#run-modal').hidden = false; $('#rm-err').hidden = true;
+  applyPreset('default'); setRunMode('code');
+  $('#rm-mount').value = ''; $('#rm-image').value = ''; $('#rm-secure').checked = false;
+  setTimeout(() => $('#rm-code').focus(), 30);
+}
 function closeRunModal() { $('#run-modal').hidden = true; }
 $('#newRunBtn').addEventListener('click', openRunModal);
 $('#rm-close').addEventListener('click', closeRunModal);
@@ -355,13 +398,19 @@ async function submitRun() {
   const err = $('#rm-err');
   if (!code.trim()) { err.textContent = 'code is required'; err.hidden = false; return; }
   const btn = $('#rm-run'), label = btn.textContent;
-  const lang = $('#rm-lang').value;
+  const lang = runMode === 'command' ? ($('#rm-image').value.trim() || 'image') : $('#rm-lang').value;
   btn.disabled = true; btn.textContent = '▶ running…'; err.hidden = true;
   let live = null;
   try {
     const res = await fetch('/api/exec?stream=1', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lang, code, network: $('#rm-net').checked ? 'on' : 'none',
-        mem: runProfile.mem, cpus: runProfile.cpus, timeout_ms: runProfile.timeout_ms }) });
+      body: JSON.stringify({
+        mode: runMode,
+        ...(runMode === 'command' ? { image: $('#rm-image').value.trim(), cmd: code } : { lang, code }),
+        mount: $('#rm-mount').value.trim() || undefined,
+        secure: $('#rm-secure').checked,
+        network: $('#rm-net').checked ? 'on' : 'none',
+        mem: runProfile.mem, cpus: runProfile.cpus, timeout_ms: runProfile.timeout_ms,
+      }) });
     if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error || 'run failed');
 
     closeRunModal();

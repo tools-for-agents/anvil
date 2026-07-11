@@ -208,3 +208,36 @@ test('serve: /api/exec?stream=1 streams events and ends with the logged run', as
     assert.equal(rec.lang, 'bash');
   } finally { server.close(); }
 });
+
+test('serve: /api/exec guards the mount, the image and the command before anything runs', async () => {
+  const server = createAnvilServer();
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://localhost:${server.address().port}`;
+  const post = (body) => fetch(base + '/api/exec', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  try {
+    // a mount that isn't there would fail inside docker with something unhelpful
+    const missing = await post({ lang: 'bash', code: 'echo hi', mount: '/definitely/not/here' });
+    assert.equal(missing.status, 400);
+    assert.match((await missing.json()).error, /no such directory/);
+
+    const notAbs = await post({ lang: 'bash', code: 'echo hi', mount: 'relative/path' });
+    assert.equal(notAbs.status, 400);
+    assert.match((await notAbs.json()).error, /absolute/);
+
+    // a file is not a directory
+    const asFile = await post({ lang: 'bash', code: 'echo hi', mount: process.argv[1] });
+    assert.equal(asFile.status, 400);
+    assert.match((await asFile.json()).error, /not a directory/);
+
+    // command mode needs a real image name and a command
+    const badImage = await post({ mode: 'command', image: 'not a valid image!!', cmd: 'ls' });
+    assert.equal(badImage.status, 400);
+    assert.match((await badImage.json()).error, /image/);
+
+    const noCmd = await post({ mode: 'command', image: 'alpine:3.20' });
+    assert.equal(noCmd.status, 400);
+    assert.match((await noCmd.json()).error, /cmd is required/);
+  } finally { server.close(); }
+});
