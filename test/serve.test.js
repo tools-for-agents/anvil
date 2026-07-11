@@ -10,7 +10,7 @@ const dir = mkdtempSync(join(tmpdir(), 'anvil-serve-'));
 process.env.ANVIL_DB = join(dir, 'runs.db');
 process.on('exit', () => { try { rmSync(dir, { recursive: true, force: true }); } catch {} });
 
-const { logRun, stats, lineDiff, recentRuns } = await import('../src/log.js');
+const { logRun, stats, lineDiff, recentRuns, getRun } = await import('../src/log.js');
 const { createAnvilServer } = await import('../src/server.js');
 
 const okId = logRun({ opts: { lang: 'python', code: 'print(2**10)', network: 'none', mem: '512m', cpus: '1', timeout_ms: 30000 },
@@ -131,4 +131,37 @@ test('lineDiff aligns rows and marks adds/removes', () => {
   assert.equal(add.r, 'x');
   assert.ok(d.rows.some((r) => r.l === 'a' && r.r === 'a' && r.lc === 'same'), 'shared lines align as same');
   assert.equal(lineDiff('same\ntext', 'same\ntext').identical, true);
+});
+
+// Pruning lives at the END of this file on purpose: it empties the shared log,
+// so anything asserting on the fixtures has to have run already.
+test('serve: DELETE prunes the log — and a GET never can', async () => {
+  const server = createAnvilServer();
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://localhost:${server.address().port}`;
+  try {
+    const doomed = logRun({ opts: { lang: 'bash', code: 'echo doomed' },
+      result: { ok: true, exit_code: 0, timed_out: false, duration_ms: 10, stdout: 'doomed\n', stderr: '' } });
+
+    // reading is not deleting: GET hits the same path, twice, and the run survives
+    assert.equal((await fetch(`${base}/api/run?id=${doomed}`).then((r) => r.json())).id, doomed);
+    assert.ok((await fetch(`${base}/api/run?id=${doomed}`)).ok, 'a GET leaves the run in the log');
+
+    // DELETE removes exactly that run, and nothing else
+    const del = await fetch(`${base}/api/run?id=${doomed}`, { method: 'DELETE' });
+    assert.equal(del.status, 200);
+    assert.equal((await del.json()).deleted, doomed);
+    assert.equal((await fetch(`${base}/api/run?id=${doomed}`)).status, 404, 'the deleted run is gone');
+    assert.ok(getRun(okId), 'the other runs are untouched');
+
+    // deleting an unknown run is a 404, not a silent success
+    assert.equal((await fetch(`${base}/api/run?id=run_nope`, { method: 'DELETE' })).status, 404);
+
+    // DELETE /api/runs clears the whole log and reports how many it dropped
+    const before = (await fetch(`${base}/api/stats`).then((r) => r.json())).runs;
+    assert.ok(before > 0, 'there are runs to clear');
+    const cleared = await fetch(`${base}/api/runs`, { method: 'DELETE' }).then((r) => r.json());
+    assert.equal(cleared.deleted, before, 'it reports the number of runs dropped');
+    assert.equal((await fetch(`${base}/api/stats`).then((r) => r.json())).runs, 0, 'the log is empty');
+  } finally { server.close(); }
 });

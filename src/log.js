@@ -72,6 +72,11 @@ export function recentRuns({ limit = 100 } = {}) {
 
 export function getRun(id) { return shape(get(`SELECT * FROM runs WHERE id=?`, id)); }
 
+// Prune the log. It grows with every run — and every re-run — so a sandbox that
+// has been hammered needs a way to drop a noisy run, or start clean.
+export function deleteRun(id) { return runq(`DELETE FROM runs WHERE id=?`, id).changes > 0; }
+export function clearRuns() { return runq(`DELETE FROM runs`).changes; }
+
 // LCS line diff → aligned rows [{ l, r, lc, rc }] where l/r are the left/right
 // line (or null for a gap) and lc/rc are 'same' | 'del' | 'add' | 'gap'.
 export function lineDiff(aText, bText) {

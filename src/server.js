@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname, normalize } from 'node:path';
-import { recentRuns, getRun, diffRuns, logRun, stats } from './log.js';
+import { recentRuns, getRun, diffRuns, logRun, deleteRun, clearRuns, stats } from './log.js';
 import { run } from './run.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -80,11 +80,21 @@ export function createAnvilServer() {
   return createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (req.method === 'OPTIONS') {
-      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,OPTIONS' });
+      res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS' });
       return res.end();
     }
     // /api/rerun executes code — require POST so a stray GET/prefetch can't trigger a run.
     if (url.pathname === '/api/rerun' && req.method !== 'POST') return json(res, 405, { error: 'use POST' });
+    // Pruning is destructive, so it lives behind DELETE on the same paths that GET
+    // reads: a stray GET or a link prefetch must never be able to wipe the log.
+    if (url.pathname === '/api/run' && req.method === 'DELETE') {
+      const id = url.searchParams.get('id');
+      if (!id || !deleteRun(id)) return json(res, 404, { error: 'run not found' });
+      return json(res, 200, { ok: true, deleted: id });
+    }
+    if (url.pathname === '/api/runs' && req.method === 'DELETE') {
+      return json(res, 200, { ok: true, deleted: clearRuns() });
+    }
     // /api/exec — run a fresh snippet from the dashboard's "new run" form (POST only; it executes code).
     if (url.pathname === '/api/exec') {
       if (req.method !== 'POST') return json(res, 405, { error: 'use POST' });

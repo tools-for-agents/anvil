@@ -45,8 +45,10 @@
 
   /* ── Run list ────────────────────────────────────────────── */
   .list-pane { grid-area:list; border-right:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; overflow:hidden; }
-  .filters { display:flex; gap:6px; padding:11px 13px; border-bottom:1px solid var(--line); }
-  .filters button { font-family:var(--mono); font-size:11px; background:var(--panel-2); border:1px solid var(--line); color:var(--muted); border-radius:20px; padding:4px 12px; cursor:pointer; transition:color .12s, border-color .12s; }
+  /* wrap rather than squeeze: the bar is full, so a narrow pane gets a second row
+     instead of buttons compressing their labels into stacks of letters */
+  .filters { display:flex; gap:6px; padding:11px 13px; border-bottom:1px solid var(--line); flex-wrap:wrap; row-gap:7px; }
+  .filters button { font-family:var(--mono); font-size:11px; background:var(--panel-2); border:1px solid var(--line); color:var(--muted); border-radius:20px; padding:4px 12px; cursor:pointer; transition:color .12s, border-color .12s; white-space:nowrap; flex:0 0 auto; }
   .filters button:hover { color:var(--txt); }
   .filters button.on { color:var(--ember); border-color:var(--ember); background:rgba(255,106,26,.09); }
   .new-run-btn { color:var(--bg) !important; background:var(--ember) !important; border-color:var(--ember) !important; font-weight:700; }
@@ -128,6 +130,11 @@
   .rerun-btn { font-family:var(--mono); font-size:11.5px; color:var(--ember); background:rgba(255,106,26,.1); border:1px solid var(--ember); border-radius:8px; padding:5px 12px; cursor:pointer; transition:background .12s; }
   .rerun-btn:hover { background:rgba(255,106,26,.2); }
   .rerun-btn:disabled { opacity:.6; cursor:default; }
+  /* Pruning the log — two-step confirm, so it stays cold until you mean it */
+  .del-btn { font-family:var(--mono); font-size:11.5px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:5px 12px; cursor:pointer; transition:color .12s, border-color .12s, background .12s; }
+  .del-btn:hover, .filters button.clear-btn:hover { color:var(--fail); border-color:var(--fail); }
+  .del-btn.armed, .filters button.clear-btn.armed { color:var(--fail); border-color:var(--fail); background:rgba(229,84,74,.12); }
+  .del-btn:disabled { opacity:.6; cursor:default; }
   .chips { display:flex; gap:7px; flex-wrap:wrap; margin:14px 0 20px; }
   .chip { font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:7px; padding:4px 10px; }
   .chip b { color:var(--txt); font-weight:600; }
@@ -198,6 +205,7 @@
       <button data-f="failed">failed</button>
       <button data-f="timeout">timed&nbsp;out</button>
       <button id="cmpToggle" class="cmp-toggle" title="Compare two runs side by side">⇄ compare</button>
+      <button id="clearBtn" class="clear-btn" title="Delete every run in the log">🗑 clear</button>
     </div>
     <div class="search-row">
       <span class="sr-icon" aria-hidden="true">⌕</span>
@@ -425,6 +433,58 @@ document.addEventListener('click', async (e) => {
     else { btn.disabled = false; btn.textContent = label; }
   } catch { btn.disabled = false; btn.textContent = label; }
 });
+// Deleting is irreversible, so every prune arms first and fires on the second
+// click. An inline arm beats confirm(): it doesn't block the page, and the
+// button itself carries the warning. It disarms on a 3s timeout, on Escape, or
+// as soon as you click anything else — walking away always cancels.
+let armed = null, armTimer = 0;
+function disarm() {
+  if (!armed) return;
+  armed.el.classList.remove('armed'); armed.el.textContent = armed.label;
+  clearTimeout(armTimer); armed = null;
+}
+// Returns true once the button is armed AND clicked again — i.e. "go ahead".
+function arm(el, warning) {
+  if (armed && armed.el === el) { clearTimeout(armTimer); armed = null; return true; }
+  disarm();
+  armed = { el, label: el.textContent };
+  el.classList.add('armed'); el.textContent = warning;
+  armTimer = setTimeout(disarm, 3000);
+  return false;
+}
+document.addEventListener('click', (e) => { if (!e.target.closest('.del-btn, .clear-btn')) disarm(); }, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') disarm(); });
+
+// Delete one run from the log.
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-del]'); if (!btn) return;
+  if (!arm(btn, '✕ delete?')) return;
+  const id = btn.dataset.del;
+  btn.disabled = true;
+  try {
+    await fetch('/api/run?id=' + encodeURIComponent(id), { method: 'DELETE' });
+    activeId = null;
+    await refreshRuns();
+    showEmpty();                                   // the run we were reading is gone
+  } catch { btn.disabled = false; btn.classList.remove('armed'); btn.textContent = '✕ delete'; }
+});
+
+// Clear the whole log.
+$('#clearBtn').addEventListener('click', async () => {
+  const btn = $('#clearBtn');
+  if (!RUNS.length) return;
+  if (!arm(btn, `🗑 clear ${RUNS.length}?`)) return;
+  btn.disabled = true;
+  try {
+    await fetch('/api/runs', { method: 'DELETE' });
+    activeId = null; sel = [];
+    await refreshRuns();
+    showEmpty();
+  } finally {
+    btn.disabled = false; btn.classList.remove('armed'); btn.textContent = '🗑 clear';
+  }
+});
+
 $('#filters').addEventListener('click', (e) => {
   const b = e.target.closest('[data-f]'); if (!b) return;
   filter = b.dataset.f;
@@ -524,6 +584,7 @@ async function openRun(id) {
       <span class="d-title">${esc(lang)} · ${esc(r.image || '')}</span>
       <span class="d-when">${new Date(r.ts).toLocaleString()}</span>
       <button class="rerun-btn" data-rerun="${esc(r.id)}" title="Re-execute this run in a fresh sandbox">↻ re-run</button>
+      <button class="del-btn" data-del="${esc(r.id)}" title="Delete this run from the log">✕ delete</button>
     </div>
     <div class="chips">
       <span class="chip">exit <b>${r.timed_out ? '—' : r.exit_code}</b></span>
