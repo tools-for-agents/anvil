@@ -165,3 +165,15 @@ test('serve: DELETE prunes the log — and a GET never can', async () => {
     assert.equal((await fetch(`${base}/api/stats`).then((r) => r.json())).runs, 0, 'the log is empty');
   } finally { server.close(); }
 });
+
+test('serve: stats advertises where cortex lives, so a run can be kept in the brain', async () => {
+  const server = createAnvilServer();
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://localhost:${server.address().port}`;
+  try {
+    const s = await fetch(base + '/api/stats').then((r) => r.json());
+    // anvil never writes to cortex — it only tells the page which brain to POST to
+    assert.equal(s.cortex, 'http://localhost:7800', 'defaults to cortex serve');
+    assert.ok('runs' in s, 'and still carries the log stats');
+  } finally { server.close(); }
+});

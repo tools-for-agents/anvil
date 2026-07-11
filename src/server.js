@@ -19,8 +19,12 @@ function json(res, code, body) {
   res.end(JSON.stringify(body));
 }
 
+// Where cortex's web view lives, so a run can be kept in the brain.
+// anvil never writes to it — the browser POSTs to cortex's own /api/capture.
+const CORTEX_URL = (process.env.ANVIL_CORTEX_URL || 'http://localhost:7800').replace(/\/$/, '');
+
 const api = {
-  '/api/stats': () => stats(),
+  '/api/stats': () => ({ ...stats(), cortex: CORTEX_URL }),
   '/api/runs': (q) => recentRuns({ limit: q.limit ? +q.limit : 100 }),
   '/api/run': (q) => {
     const r = q.id && getRun(q.id);
