@@ -107,12 +107,31 @@ export function createAnvilServer() {
         const lang = String(body.lang || '').toLowerCase();
         if (!EXEC_LANGS.has(lang)) return json(res, 400, { error: 'lang must be one of: bash, node, python' });
         if (typeof body.code !== 'string' || !body.code.trim()) return json(res, 400, { error: 'code is required' });
+        const stream = url.searchParams.get('stream') === '1';
         const opts = { lang, code: body.code, network: body.network === 'on' ? 'on' : 'none', noLog: true };
         // resource profile from the new-run form's preset picker — validated so a
         // malformed value can't reach the docker flags (falls back to run() defaults)
         if (typeof body.mem === 'string' && /^\d{1,5}m$/.test(body.mem)) opts.mem = body.mem;
         if (body.cpus != null && Number.isFinite(+body.cpus) && +body.cpus > 0) opts.cpus = String(+body.cpus);
         if (body.timeout_ms != null && Number.isFinite(+body.timeout_ms) && +body.timeout_ms > 0) opts.timeout_ms = Math.min(Math.floor(+body.timeout_ms), 300000);
+        // Streaming: the sandbox writes as it goes, so say so as it goes. SSE over the
+        // POST response (EventSource can't POST, and the code belongs in a body, not a
+        // URL) — the client reads it with fetch + a stream reader.
+        if (stream) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
+            Connection: 'keep-alive', 'X-Accel-Buffering': 'no', 'Access-Control-Allow-Origin': '*',
+          });
+          const send = (o) => { try { res.write(`data: ${JSON.stringify(o)}\n\n`); } catch {} };
+          let closed = false;
+          req.on('close', () => { closed = true; });
+          opts.onData = (kind, chunk) => { if (!closed) send({ type: kind, chunk }); };
+          send({ type: 'start', lang, ts: new Date().toISOString() });
+          const result = await run(opts);
+          const run_id = logRun({ opts, result });
+          send({ type: 'done', run_id, ...result });
+          return res.end();
+        }
         const result = await run(opts);
         const run_id = logRun({ opts, result });
         return json(res, 200, { run_id, ...result });

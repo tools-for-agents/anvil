@@ -140,6 +140,13 @@
     border:1px solid rgba(167,139,250,.4); border-radius:8px; padding:5px 12px; cursor:pointer; transition:background .12s, border-color .12s; }
   .brain-btn:hover, .brain-btn.done { background:rgba(167,139,250,.2); border-color:#a78bfa; }
   .brain-btn:disabled { opacity:.65; cursor:default; }
+  /* live console — the run, as it happens */
+  .d-status.live { display:inline-flex; align-items:center; gap:7px; }
+  .d-status .pulse { width:7px; height:7px; border-radius:50%; background:currentColor; animation:lvp 1s ease-in-out infinite; }
+  @keyframes lvp { 0%,100% { opacity:.25; } 50% { opacity:1; } }
+  #lv-out { min-height:120px; max-height:52vh; overflow:auto; white-space:pre-wrap; word-break:break-word; }
+  #lv-out .lv-err { color:var(--fail); }
+  @media (prefers-reduced-motion:reduce) { .d-status .pulse { animation:none; opacity:.8; } }
   .chips { display:flex; gap:7px; flex-wrap:wrap; margin:14px 0 20px; }
   .chip { font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:7px; padding:4px 10px; }
   .chip b { color:var(--txt); font-weight:600; }
@@ -308,22 +315,84 @@ $('#newRunBtn').addEventListener('click', openRunModal);
 $('#rm-close').addEventListener('click', closeRunModal);
 $('#run-modal').addEventListener('click', (e) => { if (e.target === $('#run-modal')) closeRunModal(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#run-modal').hidden) closeRunModal(); });
+// Watch the sandbox work. anvil used to fire a run and say nothing until it came
+// back — a 30s run looked identical to a hung one. Now the container's output is
+// streamed as it is written, straight into the detail pane.
+function liveConsole(lang, code) {
+  document.body.classList.add('viewing');
+  $('#detailEmpty').style.display = 'none';
+  const d = $('#detail'); d.hidden = false; d.style.setProperty('--st', 'var(--ember)');
+  d.innerHTML = `
+    <div class="d-head">
+      <span class="d-status live" style="--st:var(--ember)">RUNNING<span class="pulse"></span></span>
+      <span class="d-title">${esc(lang)} · streaming</span>
+      <span class="d-when" id="lv-elapsed">0.0s</span>
+    </div>
+    <div class="sect-l">code</div>
+    <pre class="block code">${esc(code)}</pre>
+    <div class="sect-l">output <span class="bytes" id="lv-bytes">waiting for the container…</span></div>
+    <pre class="block code" id="lv-out"></pre>`;
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    const el = $('#lv-elapsed'); if (el) el.textContent = ((Date.now() - t0) / 1000).toFixed(1) + 's';
+  }, 100);
+  return {
+    push(kind, chunk) {
+      const out = $('#lv-out'); if (!out) return;
+      const span = document.createElement('span');
+      if (kind === 'stderr') span.className = 'lv-err';
+      span.textContent = chunk;
+      out.appendChild(span);
+      out.scrollTop = out.scrollHeight;
+      $('#lv-bytes').textContent = out.textContent.length + ' chars';
+    },
+    stop() { clearInterval(timer); },
+  };
+}
+
 async function submitRun() {
   const code = $('#rm-code').value;
   const err = $('#rm-err');
   if (!code.trim()) { err.textContent = 'code is required'; err.hidden = false; return; }
   const btn = $('#rm-run'), label = btn.textContent;
+  const lang = $('#rm-lang').value;
   btn.disabled = true; btn.textContent = '▶ running…'; err.hidden = true;
+  let live = null;
   try {
-    const res = await fetch('/api/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lang: $('#rm-lang').value, code, network: $('#rm-net').checked ? 'on' : 'none',
-        mem: runProfile.mem, cpus: runProfile.cpus, timeout_ms: runProfile.timeout_ms }) }).then((r) => r.json());
-    if (!res.run_id) throw new Error(res.error || 'run failed');    // a failed *sandbox* run still returns a run_id (worth opening)
+    const res = await fetch('/api/exec?stream=1', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lang, code, network: $('#rm-net').checked ? 'on' : 'none',
+        mem: runProfile.mem, cpus: runProfile.cpus, timeout_ms: runProfile.timeout_ms }) });
+    if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error || 'run failed');
+
     closeRunModal();
+    live = liveConsole(lang, code);
+
+    // read the event stream as the container writes it
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = '', done = null;
+    for (;;) {
+      const { value, done: fin } = await reader.read();
+      if (fin) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();                                  // keep the incomplete tail
+      for (const p of parts) {
+        const line = p.replace(/^data: /, '').trim();
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.type === 'stdout' || ev.type === 'stderr') live.push(ev.type, ev.chunk);
+        else if (ev.type === 'done') done = ev;
+      }
+    }
+    live.stop(); live = null;
+    if (!done || !done.run_id) throw new Error((done && done.error) || 'run failed');
     await refreshRuns();
-    openRun(res.run_id);
-  } catch (e) { err.textContent = String(e.message || e); err.hidden = false; }
-  finally { btn.disabled = false; btn.textContent = label; }
+    openRun(done.run_id);                                 // the finished run, with its full record
+  } catch (e) {
+    if (live) live.stop();
+    err.textContent = String(e.message || e); err.hidden = false;
+    $('#run-modal').hidden = false;                       // put the form back so the code isn't lost
+  } finally { btn.disabled = false; btn.textContent = label; }
 }
 $('#rm-run').addEventListener('click', submitRun);
 $('#rm-code').addEventListener('keydown', (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submitRun(); } });   // ⌘/Ctrl+Enter runs

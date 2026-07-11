@@ -40,3 +40,34 @@ test('run enforces a hard timeout', { skip: noDocker }, async () => {
   const r = await run({ lang: 'bash', code: 'sleep 8', timeout_ms: 1500 });
   assert.equal(r.timed_out, true);
 });
+
+test('run streams output as the container writes it, not all at once at the end', { skip: noDocker }, async () => {
+  const t0 = Date.now();
+  const chunks = [];
+  const r = await run({
+    lang: 'bash',
+    code: 'for i in 1 2 3; do echo tick $i; sleep 0.4; done; echo late >&2',
+    onData: (stream, chunk) => chunks.push({ at: Date.now() - t0, stream, text: chunk }),
+  });
+
+  assert.equal(r.exit_code, 0);
+  assert.ok(chunks.length >= 2, 'output arrived in pieces, not one lump');
+
+  // the point of streaming: a chunk reached us well before the run finished
+  const first = chunks[0];
+  assert.ok(first.at < r.duration_ms - 200, `first chunk at ${first.at}ms, run took ${r.duration_ms}ms — it did not stream`);
+
+  // both streams are distinguished
+  assert.ok(chunks.some((c) => c.stream === 'stdout' && /tick 1/.test(c.text)));
+  assert.ok(chunks.some((c) => c.stream === 'stderr' && /late/.test(c.text)));
+
+  // and the buffered result is still whole — streaming must not eat the record
+  assert.match(r.stdout, /tick 1\ntick 2\ntick 3/);
+  assert.match(r.stderr, /late/);
+});
+
+test('a listener that throws cannot take the run down with it', { skip: noDocker }, async () => {
+  const r = await run({ lang: 'bash', code: 'echo alive', onData: () => { throw new Error('bad listener'); } });
+  assert.equal(r.ok, true, 'the run still completes');
+  assert.match(r.stdout, /alive/);
+});

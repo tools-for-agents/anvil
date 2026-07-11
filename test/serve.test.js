@@ -177,3 +177,34 @@ test('serve: stats advertises where cortex lives, so a run can be kept in the br
     assert.ok('runs' in s, 'and still carries the log stats');
   } finally { server.close(); }
 });
+
+test('serve: /api/exec?stream=1 streams events and ends with the logged run', async () => {
+  const server = createAnvilServer();
+  await new Promise((r) => server.listen(0, r));
+  const base = `http://localhost:${server.address().port}`;
+  try {
+    const res = await fetch(base + '/api/exec?stream=1', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lang: 'bash', code: 'echo streamed' }),
+    });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type'), /text\/event-stream/);
+
+    // read the whole stream and parse the events (works with or without Docker:
+    // without it, run() reports the error and the run is still logged)
+    const text = await res.text();
+    const events = text.split('\n\n').filter(Boolean)
+      .map((p) => { try { return JSON.parse(p.replace(/^data: /, '')); } catch { return null; } })
+      .filter(Boolean);
+
+    assert.equal(events[0].type, 'start', 'it opens with a start event');
+    const done = events.at(-1);
+    assert.equal(done.type, 'done', 'and closes with a done event');
+    assert.ok(done.run_id, 'carrying the id of the run it logged');
+
+    // the run really is in the log, so the stream and the record agree
+    const rec = await fetch(`${base}/api/run?id=${done.run_id}`).then((r) => r.json());
+    assert.equal(rec.id, done.run_id);
+    assert.equal(rec.lang, 'bash');
+  } finally { server.close(); }
+});

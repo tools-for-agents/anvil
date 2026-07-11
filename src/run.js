@@ -45,7 +45,7 @@ export function run(opts = {}) {
     if (!docker) return resolveP({ ok: false, error: 'docker is not available' });
 
     let { image, lang, code, cmd, files = {}, stdin = null, mount = null,
-      timeout_ms = 30_000, network = 'none', mem = '512m', cpus = '1', secure = false } = opts;
+      timeout_ms = 30_000, network = 'none', mem = '512m', cpus = '1', secure = false, onData = null } = opts;
     timeout_ms = Math.min(Math.max(1000, timeout_ms), MAX_TIMEOUT);
 
     // resolve preset from lang/code
@@ -86,10 +86,17 @@ export function run(opts = {}) {
     const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '', outTrunc = false, errTrunc = false, timedOut = false;
 
+    // The container's output already arrives in chunks — anvil just buffered it and
+    // said nothing until the end. onData hands each chunk out as it is written, so a
+    // caller can watch a run happen instead of staring at a spinner. Optional, and
+    // guarded: a listener that throws must not take the run down with it.
+    const emit = (stream, d) => { if (!onData) return; try { onData(stream, String(d)); } catch {} };
     child.stdout.on('data', (d) => {
+      emit('stdout', d);
       if (out.length < MAX_OUTPUT) out += d; else outTrunc = true;
     });
     child.stderr.on('data', (d) => {
+      emit('stderr', d);
       if (err.length < MAX_OUTPUT) err += d; else errTrunc = true;
     });
     if (stdin != null) { try { child.stdin.write(String(stdin)); } catch {} }
