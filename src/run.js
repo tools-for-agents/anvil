@@ -106,6 +106,26 @@ export function run(opts = {}) {
       '--pids-limit', '512', '--security-opt', 'no-new-privileges',
       '--cap-drop', 'ALL',
       '-v', `${work}:/work`, '-w', '/work'];
+
+    // RUN AS THE USER, NOT AS ROOT — and this is a bug fix, not a hardening flourish.
+    //
+    // `--cap-drop ALL` takes away CAP_DAC_OVERRIDE, which is the capability that lets
+    // root ignore file permissions. The work dir is mkdtemp's 0700, owned by the host
+    // user. So container-root could not read the file anvil had just written:
+    //
+    //     python: can't open file '/work/main.py': [Errno 13] Permission denied
+    //
+    // On macOS this never showed, because Docker Desktop's file-sharing layer launders
+    // ownership. On Linux — every CI runner, every server, every place this would
+    // actually be deployed — anvil could not run code from a file AT ALL. It was broken
+    // for its entire life on the only platform that matters, and its own test suite went
+    // green on Linux the whole time, because those tests pass `cmd` and never write a file.
+    //
+    // Matching the container's uid to the host's fixes it at the root: the process owns
+    // the files it is given, no permissions need loosening, and nothing runs as root.
+    if (typeof process.getuid === 'function') {
+      args.push('--user', `${process.getuid()}:${process.getgid()}`);
+    }
     if (mount) args.push('-v', `${resolve(mount)}:/repo:ro`);   // host dir, read-only at /repo
     if (secure) args.push('--read-only', '--tmpfs', '/tmp:rw,size=64m');
     args.push(image, '/bin/sh', '-c', cmd);
