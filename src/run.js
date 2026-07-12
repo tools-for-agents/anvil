@@ -18,6 +18,8 @@ export const PRESETS = {
 
 const MAX_OUTPUT = 200_000;       // chars per stream before truncation
 const MAX_TIMEOUT = 300_000;
+// Pulling an image is not running code, so it gets its own, generous clock.
+const PULL_TIMEOUT = 300_000;
 
 export function dockerAvailable() {
   const r = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { encoding: 'utf8' });
@@ -68,6 +70,33 @@ export function run(opts = {}) {
     } catch (e) {
       rmSync(work, { recursive: true, force: true });
       return resolveP({ ok: false, error: e.message });
+    }
+
+    const startedAt = Date.now();
+
+    // THE TIMEOUT IS FOR YOUR CODE, NOT FOR A DOWNLOAD.
+    //
+    // `docker run` pulls a missing image before it starts anything — so on a machine
+    // that has never seen the image (which is EVERY machine, the first time) the 30s
+    // code timeout was ticking while Docker downloaded 50MB of Alpine. Then anvil killed
+    // it and reported a failure about the code. It worked perfectly on my laptop, where
+    // the image had been cached for weeks, and failed for every new user.
+    //
+    // The kit's own end-to-end loop test found this on a cold CI runner, on its first run:
+    //     3. anvil  run safely  ✗ exit 2: Unable to find image 'python:3.12-alpine' locally
+    //
+    // So: get the image FIRST, on its own clock, and say so if that is what failed.
+    const have = spawnSync('docker', ['image', 'inspect', image], { stdio: 'ignore' });
+    if (have.status !== 0) {
+      const pull = spawnSync('docker', ['pull', image], { encoding: 'utf8', timeout: PULL_TIMEOUT });
+      if (pull.status !== 0) {
+        rmSync(work, { recursive: true, force: true });
+        return resolveP({ ok: false, image, timed_out: false, exit_code: null,
+          error: `could not pull the image "${image}" (${pull.error?.code || `exit ${pull.status}`}). `
+            + `anvil needs it before it can run anything, and this is not a problem with your code. `
+            + `${(pull.stderr || '').trim().split('\n').pop() || ''}`.trim(),
+          duration_ms: Date.now() - startedAt });
+      }
     }
 
     const name = 'anvil_' + randomUUID().slice(0, 12);
