@@ -20,6 +20,10 @@ function printResult(r) {
 }
 
 (async () => {
+  if (cmd === 'mcp') {
+    // stdio JSON-RPC. The server starts on import: `npx @tools-for-agents/anvil mcp`
+    return void await import('../mcp/mcp-server.js');
+  }
   if (cmd === 'check') {
     return out({ docker: dockerAvailable() || 'unavailable', presets: Object.keys(PRESETS) });
   }

@@ -1,10 +1,46 @@
 {
-  "name": "anvil-agent",
+  "name": "@tools-for-agents/anvil",
   "version": "0.1.0",
-  "description": "Throwaway Docker sandbox for agents: run code/commands in resource-limited, network-isolated containers and get structured results. Zero dependencies.",
+  "description": "A throwaway Docker sandbox: run untrusted code network-off, memory-capped and timed.",
   "type": "module",
-  "bin": { "anvil": "src/cli.js" },
-  "engines": { "node": ">=22" },
-  "scripts": { "serve": "node src/cli.js serve", "mcp": "node mcp/mcp-server.js", "test": "node --test" },
-  "license": "MIT"
+  "bin": {
+    "anvil": "src/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "serve": "node src/cli.js serve",
+    "mcp": "node mcp/mcp-server.js",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "mcpName": "io.github.tools-for-agents/anvil",
+  "files": [
+    "src",
+    "mcp",
+    "public",
+    "tokens.json",
+    "action.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tools-for-agents/anvil.git"
+  },
+  "homepage": "https://tools-for-agents.github.io",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "ai-agents",
+    "agent-tools",
+    "claude",
+    "llm",
+    "zero-dependency",
+    "anvil"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
