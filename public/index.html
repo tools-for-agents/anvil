@@ -133,7 +133,7 @@
   .rm-run { margin-left: auto; font-family:var(--mono); font-size:12px; font-weight:700; color:var(--bg);
     background:var(--ember); border:1px solid var(--ember); border-radius:8px; padding: 8px 16px; cursor:pointer; transition:background .12s; }
   .rm-run:hover { background:var(--ember-hot); }
-  .rm-run:disabled { opacity:.6; cursor:default; }
+  .rm-run:disabled {  cursor:default; opacity:1 !important; color:var(--muted) !important; background:var(--panel-2) !important; border-color:var(--line) !important; cursor:not-allowed;}
   .search-row { display:flex; align-items:center; gap: 8px; padding: 8px 12px; border-bottom:1px solid var(--line); }
   .search-row .sr-icon { font-family:var(--mono); font-size:12px; color:var(--faint); flex:none; }
   .run-search { flex:1; min-width:0; font-family:var(--mono); font-size:12px; color:var(--txt);
@@ -177,17 +177,17 @@
   .d-when { margin-left: auto; font-family:var(--mono); font-size:12px; color:var(--muted); }
   .rerun-btn { font-family:var(--mono); font-size:12px; color:var(--ember); background:rgba(255,106,26,.1); border:1px solid var(--ember); border-radius:8px; padding: 4px 12px; cursor:pointer; transition:background .12s; }
   .rerun-btn:hover { background:rgba(255,106,26,.2); }
-  .rerun-btn:disabled { opacity:.6; cursor:default; }
+  .rerun-btn:disabled {  cursor:default; opacity:1 !important; color:var(--muted) !important; background:var(--panel-2) !important; border-color:var(--line) !important; cursor:not-allowed;}
   /* Pruning the log — two-step confirm, so it stays cold until you mean it */
   .del-btn { font-family:var(--mono); font-size:12px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding: 4px 12px; cursor:pointer; transition:color .12s, border-color .12s, background .12s; }
   .del-btn:hover, .filters button.clear-btn:hover { color:var(--fail); border-color:var(--fail); }
   .del-btn.armed, .filters button.clear-btn.armed { color:var(--fail); border-color:var(--fail); background:rgba(229,84,74,.12); }
-  .del-btn:disabled { opacity:.6; cursor:default; }
+  .del-btn:disabled {  cursor:default; opacity:1 !important; color:var(--muted) !important; background:var(--panel-2) !important; border-color:var(--line) !important; cursor:not-allowed;}
   /* capture wears cortex's violet, not anvil's ember: it is the brain's action */
   .brain-btn { font-family:var(--mono); font-size:12px; color:#a78bfa; background:rgba(167,139,250,.1);
     border:1px solid rgba(167,139,250,.4); border-radius:8px; padding: 4px 12px; cursor:pointer; transition:background .12s, border-color .12s; }
   .brain-btn:hover, .brain-btn.done { background:rgba(167,139,250,.2); border-color:#a78bfa; }
-  .brain-btn:disabled { opacity:.65; cursor:default; }
+  .brain-btn:disabled {  cursor:default; opacity:1 !important; color:var(--muted) !important; background:var(--panel-2) !important; border-color:var(--line) !important; cursor:not-allowed;}
   /* live console — the run, as it happens */
   .d-status.live { display:inline-flex; align-items:center; gap: 8px; }
   .d-status .pulse { width:7px; height:7px; border-radius:50%; background:currentColor; animation:lvp 1s ease-in-out infinite; }
