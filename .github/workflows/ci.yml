@@ -71,3 +71,36 @@ jobs:
           name: anvil
           tokens: kit      # the kit's ONE design system — iris/tokens.json, not a copy
           strict: true     # drift is a regression now; a gate is what keeps it from creeping back
+
+  # THE EMPTY STATE IS THE ONE STATE EVERY USER SEES FIRST — AND NOTHING WAS LOOKING AT IT.
+  #
+  # The `look` job above seeds data on purpose: a UI gate that has never seen a row of data
+  # is a screenshot of an empty room. But making every gate seed meant the EMPTY page — the
+  # first thing a new user ever sees — stopped being rendered by anything at all. I closed
+  # one blind spot by opening another.
+  #
+  # And a real bug was living in it: `scout serve` CRASHED AT STARTUP on a machine with no
+  # cache, because stats() runs before the server listens and a read no longer creates the
+  # store. A brand-new user's very first command died. The tests seed, the gate seeds, and
+  # my own machine has had a cache for weeks — so the bug lived in a state nothing here
+  # ever entered.
+  first-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+      - name: serve it with NOTHING in it, exactly as a new user would
+        run: |
+          ANVIL_DB=/tmp/empty/a.db node src/cli.js serve &
+          for i in $(seq 30); do curl -sf http://localhost:7930/ >/dev/null && break; sleep 1; done
+          curl -sf http://localhost:7930/ >/dev/null || { echo "::error::the server did not start on an empty store — that is what a new user gets"; exit 1; }
+      - uses: tools-for-agents/iris@main
+        with:
+          url: http://localhost:7930/
+          viewports: phone,tablet,desktop
+          name: anvil-first-run
+          tokens: kit
