@@ -200,3 +200,44 @@ test('nothing the MCP server can reach is allowed to print to stdout', async () 
   assert.deepEqual(offenders, [],
     'stdout is the protocol — one stray print desyncs every agent session:\n  ' + offenders.join('\n  '));
 });
+
+// ── "docker is not available" is two different problems ─────────────────────────
+test('a missing Docker and a sleeping Docker are not the same sentence', async (t) => {
+  const { mkdtempSync, rmSync, writeFileSync, chmodSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join, dirname } = await import('node:path');
+  const { spawnSync, execSync } = await import('node:child_process');
+
+  // The whole message used to be: `docker is not available`. It names no cause, suggests
+  // no action, and CONFLATES TWO SITUATIONS WITH DIFFERENT FIXES — one you solve by
+  // installing Docker, the other by starting it. I hit the second myself, twice in a day:
+  // Docker Desktop had quit, and anvil said the same six words it says to someone who has
+  // never installed it.
+  const node = execSync('which node', { encoding: 'utf8' }).trim();
+  const ask = (path) => {
+    const r = spawnSync(node, ['--input-type=module', '-e',
+      "import { dockerStatus } from './src/run.js'; console.log(JSON.stringify(dockerStatus()));"],
+      { encoding: 'utf8', cwd: process.cwd(), env: { ...process.env, PATH: path } });
+    return JSON.parse(r.stdout.trim());
+  };
+
+  // 1. No docker binary at all.
+  const empty = mkdtempSync(join(tmpdir(), 'anvil-nodocker-'));
+  t.after(() => rmSync(empty, { recursive: true, force: true }));
+  const gone = ask(empty);
+  assert.equal(gone.reason, 'not-installed');
+  assert.match(gone.error, /not installed/i);
+  assert.match(gone.error, /docs\.docker\.com/, 'and says where to get it');
+
+  // 2. A docker that exists and cannot reach its daemon — a completely different fix.
+  const fake = mkdtempSync(join(tmpdir(), 'anvil-deaddaemon-'));
+  t.after(() => rmSync(fake, { recursive: true, force: true }));
+  const bin = join(fake, 'docker');
+  writeFileSync(bin, '#!/bin/sh\necho "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?" 1>&2\nexit 1\n');
+  chmodSync(bin, 0o755);
+  const asleep = ask(`${fake}:${dirname(node)}`);
+  assert.equal(asleep.reason, 'daemon-down');
+  assert.match(asleep.error, /daemon is not running/i, 'it says the daemon, not the install');
+  assert.match(asleep.error, /Docker Desktop|systemctl start docker/, 'and says how to start it');
+  assert.doesNotMatch(asleep.error, /not installed/i, 'and does NOT send you looking for the wrong problem');
+});

@@ -21,9 +21,44 @@ const MAX_TIMEOUT = 300_000;
 // Pulling an image is not running code, so it gets its own, generous clock.
 const PULL_TIMEOUT = 300_000;
 
-export function dockerAvailable() {
+// "docker is not available" was the whole message. It names no cause, suggests no action,
+// and — worse — it CONFLATES TWO COMPLETELY DIFFERENT SITUATIONS WITH DIFFERENT FIXES:
+//
+//   · Docker is not installed        → install it
+//   · Docker is installed and the daemon is not running → start it
+//
+// Those are not the same problem, and telling a user "not available" sends them to look
+// for the wrong one. (I hit the second myself, twice, in a single day: Docker Desktop had
+// quit, and anvil said the same six words it says to someone who has never installed it.)
+//
+// They are trivially distinguishable: no binary at all is ENOENT from the spawn; a dead
+// daemon is a binary that runs and complains that it cannot connect. So say which.
+export function dockerStatus() {
   const r = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { encoding: 'utf8' });
-  return r.status === 0 ? r.stdout.trim() : null;
+  if (r.error?.code === 'ENOENT') {
+    return { ok: false, reason: 'not-installed',
+      error: 'Docker is not installed on this machine. anvil runs your code inside a throwaway container, '
+        + 'so it needs one — this is not a problem with your code. '
+        + 'Install Docker Desktop (macOS/Windows) or the docker engine (Linux): https://docs.docker.com/get-docker/' };
+  }
+  if (r.status === 0) return { ok: true, version: (r.stdout || '').trim() };
+
+  const said = (r.stderr || '').trim().split('\n')[0];
+  if (/cannot connect to the docker daemon|daemon (is )?not running|docker daemon running/i.test(said)) {
+    return { ok: false, reason: 'daemon-down',
+      error: 'Docker is installed, but the daemon is not running — a different problem from a missing Docker, '
+        + 'and a different fix. Start it: open Docker Desktop (macOS/Windows), or `sudo systemctl start docker` (Linux).'
+        + (said ? ` (docker said: ${said})` : ''), detail: said };
+  }
+  return { ok: false, reason: 'unknown',
+    error: `docker is installed but did not answer${said ? `: ${said}` : ''}. anvil needs it to run anything.`,
+    detail: said };
+}
+
+/** Kept for callers that only want the version string (or null). */
+export function dockerAvailable() {
+  const s = dockerStatus();
+  return s.ok ? s.version : null;
 }
 
 // Opt-in run logging: when ANVIL_DB is set, record the run for `anvil serve`.
@@ -43,8 +78,8 @@ function safeJoin(base, rel) {
 // noLog: skip the opt-in auto-log (the caller will log it itself, e.g. to capture the new id).
 export function run(opts = {}) {
   return new Promise((resolveP) => {
-    const docker = dockerAvailable();
-    if (!docker) return resolveP({ ok: false, error: 'docker is not available' });
+    const docker = dockerStatus();
+    if (!docker.ok) return resolveP({ ok: false, docker: docker.reason, error: docker.error });
 
     let { image, lang, code, cmd, files = {}, stdin = null, mount = null,
       timeout_ms = 30_000, network = 'none', mem = '512m', cpus = '1', secure = false, onData = null } = opts;

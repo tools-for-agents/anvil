@@ -3,7 +3,7 @@
 // throwaway, resource-limited Docker container and get a structured result, so
 // work can be *verified* without touching the host. Zero npm dependencies.
 import { createInterface } from 'node:readline';
-import { run, dockerAvailable, PRESETS } from '../src/run.js';
+import { run, dockerStatus, PRESETS } from '../src/run.js';
 
 const PROTOCOL = '2024-11-05';
 
@@ -39,7 +39,15 @@ const tools = [
     name: 'anvil_check',
     description: 'Check Docker availability and list language presets.',
     inputSchema: { type: 'object', properties: {} },
-    run: () => ({ docker: dockerAvailable() || 'unavailable', presets: Object.keys(PRESETS) }),
+    // `anvil_check` is the tool an agent calls to find out whether it CAN run anything.
+    // "unavailable" told it nothing it could act on — and hid the difference between a
+    // Docker that is missing and a Docker that is merely asleep. Two problems, two fixes.
+    run: () => {
+      const d = dockerStatus();
+      return d.ok
+        ? { docker: d.version, ready: true, presets: Object.keys(PRESETS) }
+        : { docker: null, ready: false, problem: d.reason, error: d.error, presets: Object.keys(PRESETS) };
+    },
   },
 ];
 
