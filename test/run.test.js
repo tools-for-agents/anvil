@@ -1,12 +1,29 @@
-// anvil tests — run with `node --test`. The preset/log/serve tests always run;
-// the sandbox tests need a Docker that can actually run anvil's containers and
-// skip cleanly otherwise. Probing `docker version` (or a bare `docker run`) is
-// not enough: some CI runners report a version and can run a plain container, yet
-// reject the resource-limit flags anvil uses (--cpus / --memory-swap / --pids-limit
-// / bind mount) under their constrained cgroups. So we probe with run() itself —
-// the exact invocation the tests exercise — and skip if it can't produce output.
+// anvil tests — run with `node --test`.
+//
+// ⚠ NEVER GATE A TEST ON THE THING IT IS TESTING.
+//
+// This guard used to probe by calling run() — "the exact invocation the tests exercise".
+// The reasoning was sound (some runners report a docker version and run a plain container
+// yet reject anvil's --cpus / --memory-swap / --pids-limit flags), and the consequence was
+// catastrophic: when anvil itself broke, the probe broke with it, the guard concluded
+// "no Docker here", and every sandbox test SKIPPED.
+//
+// On Linux, anvil could not read the file it had just written (--cap-drop ALL removes
+// CAP_DAC_OVERRIDE, so container-root cannot read a 0700 host dir). The suite went GREEN
+// on every Linux CI run for the entire life of the project:
+//
+//     ℹ tests 20   ℹ pass 11   ℹ fail 0   ℹ skipped 9
+//
+// Nine skipped. Nobody looks at "skipped". The tool did not work at all on the only
+// platform it ships to, and its own test suite reported success.
+//
+// So the probe now asks the ENVIRONMENT a question about ITSELF — can this docker run a
+// container with anvil's resource flags? — using docker directly, with no bind mount and
+// no file anvil wrote. A bug in anvil can no longer switch off the tests that would catch
+// it. A skip must mean "this machine cannot run the test", never "the code is broken".
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { PRESETS, run } from '../src/run.js';
 
 test('PRESETS map languages to images and commands', () => {
@@ -15,8 +32,15 @@ test('PRESETS map languages to images and commands', () => {
   assert.equal(PRESETS.bash.cmd('main.sh'), 'sh main.sh');
 });
 
-const probe = await run({ lang: 'bash', code: 'echo anvil-probe' }).catch(() => ({}));
-const noDocker = !(probe.ok && /anvil-probe/.test(probe.stdout || '')) && 'docker cannot run anvil containers here';
+const probe = spawnSync('docker', [
+  'run', '--rm', '--network', 'none',
+  '--memory', '512m', '--memory-swap', '512m', '--cpus', '1',
+  '--pids-limit', '512', '--security-opt', 'no-new-privileges', '--cap-drop', 'ALL',
+  'alpine:3.20', '/bin/sh', '-c', 'echo anvil-probe',
+], { encoding: 'utf8', timeout: 300_000 });
+const noDocker = probe.status === 0 && /anvil-probe/.test(probe.stdout || '')
+  ? false
+  : 'this docker cannot run anvil-style containers (no daemon, or the resource flags are rejected)';
 
 test('run executes code and returns structured output', { skip: noDocker }, async () => {
   const r = await run({ lang: 'python', code: 'print(2**10)' });
