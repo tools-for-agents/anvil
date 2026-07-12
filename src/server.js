@@ -7,7 +7,7 @@ import { statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname, normalize, isAbsolute } from 'node:path';
 import { recentRuns, getRun, diffRuns, logRun, deleteRun, clearRuns, stats } from './log.js';
-import { run } from './run.js';
+import { run, dockerStatus } from './run.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(__dir, '..', 'public');
@@ -25,7 +25,13 @@ function json(res, code, body) {
 const CORTEX_URL = (process.env.ANVIL_CORTEX_URL || 'http://localhost:7800').replace(/\/$/, '');
 
 const api = {
-  '/api/stats': () => ({ ...stats(), cortex: CORTEX_URL }),
+  // THE PAGE MUST SAY WHEN THE TOOL CANNOT WORK AT ALL.
+  //
+  // With Docker dead, the forge log showed "The forge is cold — no runs yet" and a
+  // cheerful "+ new run" button that could not possibly work. The forge is not cold.
+  // THERE IS NO FORGE. An empty state that implies readiness, on a tool that cannot run
+  // anything, is the same lie as an empty store answering a query.
+  '/api/stats': () => ({ ...stats(), docker: dockerStatus(), cortex: CORTEX_URL }),
   '/api/runs': (q) => recentRuns({ limit: q.limit ? +q.limit : 100 }),
   '/api/run': (q) => {
     const r = q.id && getRun(q.id);
