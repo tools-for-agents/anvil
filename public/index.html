@@ -246,8 +246,11 @@
 .xtk .xtk-l{color:var(--muted);letter-spacing:.3px;padding: 8px 0;}
 .xtk a,.xtk .cur{display:inline-flex;align-items:center;gap: 8px;min-height:24px;padding: 4px 8px;border-radius:8px;color:inherit;text-decoration:none;}
 .xtk a::before,.xtk .cur::before{content:"";width:7px;height:7px;border-radius:999px;background:var(--x);flex:none;}
-.xtk a{opacity:.82;transition:opacity .12s,background .12s;}
-.xtk a:hover{opacity:1;background:color-mix(in srgb, var(--x) 20%, transparent);}
+/* The cross-tool strip is on EVERY page of EVERY tool, and it was faded. `opacity:.82`
+   put these links at 4.19:1 — under AA — to signal "not the current tool", which the
+   bold `.cur` already says. Redundant signalling, paid for in legibility. Full strength. */
+  .xtk a{transition:opacity .12s,background .12s;}
+.xtk a:hover{background:color-mix(in srgb, var(--x) 20%, transparent);}
 .xtk .cur{font-weight:700;background:color-mix(in srgb, var(--x) 18%, transparent);}
 </style>
 </head>
