@@ -24,10 +24,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Serve it
+      # THE GATE WAS LOOKING AT AN EMPTY PAGE.
+      #
+      # Every one of these UIs is data-driven, and CI was serving it with nothing in it.
+      # An empty page cannot overflow, cannot collide, cannot clip and cannot be
+      # unreadable — there is nothing on it to be wrong. A UI gate that has never seen a
+      # row of real data is not a gate; it is a screenshot of an empty room.
+      #
+      # (agent-hq's gate had been auditing a blank board for months. It went green every
+      # time. The seed script existed; nobody ran it.)
+      #
+      # So: put something real on the page, and ASSERT it is there before looking.
+      - name: Serve it, THEN put something on it
         run: |
-          node src/cli.js serve &
-          for i in $(seq 30); do curl -sf http://localhost:7930/ >/dev/null && break; sleep 1; done
+          ANVIL_DB=./.anvil/runs.db node scripts/seed.js
+          ANVIL_DB=./.anvil/runs.db node src/cli.js serve &
+          for i in $(seq 30); do curl -sf http://localhost:7930/api/stats >/dev/null && break; sleep 1; done
+          n=$(curl -sf http://localhost:7930/api/stats | node -pe "JSON.parse(require('fs').readFileSync(0)).runs ?? 0")
+          echo "on the page: runs=$n"
+          test "$n" -gt 0 || { echo "::error::runs=0 — iris would be auditing an empty page"; exit 1; }
       - uses: tools-for-agents/iris@main
         with:
           url: http://localhost:7930/
