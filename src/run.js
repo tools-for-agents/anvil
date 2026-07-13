@@ -18,6 +18,11 @@ export const PRESETS = {
 
 const MAX_OUTPUT = 200_000;       // chars per stream before truncation
 const MAX_TIMEOUT = 300_000;
+// A bad timeout_ms ('abc' / NaN / 0 / negative) must not slip through. NaN SURVIVES Math.max/min
+// (Math.max(1000, NaN) === NaN), and setTimeout(fn, NaN) fires IMMEDIATELY — so an unclamped bad
+// value kills a perfectly good run on the spot and reports it as a timeout. Coerce to the default
+// first (`|| 30_000` catches NaN and 0), then clamp to [1000, MAX_TIMEOUT].
+export const clampTimeout = (ms) => Math.min(Math.max(1000, +ms || 30_000), MAX_TIMEOUT);
 // Pulling an image is not running code, so it gets its own, generous clock.
 const PULL_TIMEOUT = 300_000;
 
@@ -91,7 +96,7 @@ export function run(opts = {}) {
 
     let { image, lang, code, cmd, files = {}, stdin = null, mount = null,
       timeout_ms = 30_000, network = 'none', mem = '512m', cpus = '1', secure = false, onData = null } = opts;
-    timeout_ms = Math.min(Math.max(1000, timeout_ms), MAX_TIMEOUT);
+    timeout_ms = clampTimeout(timeout_ms);
 
     // resolve preset from lang/code
     if (lang && PRESETS[lang]) {

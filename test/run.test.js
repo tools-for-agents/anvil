@@ -24,7 +24,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { PRESETS, run, safeJoin } from '../src/run.js';
+import { PRESETS, run, safeJoin, clampTimeout } from '../src/run.js';
 
 test('PRESETS map languages to images and commands', () => {
   assert.equal(PRESETS.python.image, 'python:3.12-alpine');
@@ -315,4 +315,16 @@ test('safeJoin refuses to write outside the work directory, however the path is 
     assert.throws(() => safeJoin(base, rel), /unsafe file path/,
       `must refuse to write outside the work dir: ${JSON.stringify(rel)}`);
   }
+});
+
+test('clampTimeout coerces a bad timeout instead of killing a good run on the spot', () => {
+  // NaN survives Math.max/min, and setTimeout(fn, NaN) fires at 0ms — so an unclamped bad
+  // timeout_ms kills a valid program instantly and calls it a timeout. All bad values → the default.
+  for (const bad of [NaN, 'abc', 0, undefined, null]) {
+    assert.equal(clampTimeout(bad), 30_000, `timeout_ms=${String(bad)} falls back to the 30s default, not NaN/0`);
+  }
+  assert.equal(clampTimeout(-5), 1000, 'a negative is floored, not left to kill instantly');
+  assert.equal(clampTimeout(500), 1000, 'below the 1s floor is raised to it');
+  assert.equal(clampTimeout(5000), 5000, 'a sane value is left alone');
+  assert.equal(clampTimeout(10_000_000), 300_000, 'and a huge one is capped at the ceiling');
 });
