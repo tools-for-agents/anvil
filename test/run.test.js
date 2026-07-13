@@ -241,3 +241,50 @@ test('a missing Docker and a sleeping Docker are not the same sentence', async (
   assert.match(asleep.error, /Docker Desktop|systemctl start docker/, 'and says how to start it');
   assert.doesNotMatch(asleep.error, /not installed/i, 'and does NOT send you looking for the wrong problem');
 });
+
+// ANVIL COULD NOT RUN CODE FROM A FILE ON LINUX. AT ALL. EVER.
+//
+//   python: can't open file '/work/main.py': [Errno 13] Permission denied
+//
+// `--cap-drop ALL` removes CAP_DAC_OVERRIDE — the capability that lets root ignore file
+// permissions — and the work dir is mkdtemp's 0700, owned by the host user. So root in the
+// container could not read the file the host had just written. On Linux — every CI runner,
+// every server — the sandbox tool did not work.
+//
+// macOS HID IT: Docker Desktop launders ownership through its VM. The fix was not to loosen
+// permissions but to STOP BEING ROOT: match the container uid to the host uid.
+//
+// And nothing was guarding it. A canary deleted the --user flag outright and this suite
+// stayed green — on macOS it passes either way, which is the very reason the bug survived
+// for anvil's entire life. So assert the thing itself: we are not root.
+test('the sandbox does not run as root', { skip: noDocker }, async () => {
+  const r = await run({ lang: 'bash', code: 'id -u' });
+  assert.equal(r.exit_code, 0);
+  assert.notEqual(r.stdout.trim(), '0',
+    'the container is running as ROOT — without --user, anvil cannot read its own work dir on Linux');
+});
+
+// `--cap-drop ALL` is the difference between "code you did not write, in a box" and "code you
+// did not write, holding capabilities". Nothing was guarding that either: the flag could be
+// swapped for a no-op label and the suite went green.
+//
+// The kernel will tell you plainly — but you have to ask it the RIGHT question.
+//
+// My first attempt asserted CapEff (the EFFECTIVE set) and it could not fail: a non-root
+// process has an empty effective set whether or not you drop capabilities, so the assertion
+// was true in both worlds and killed nothing. A test that cannot tell the two apart is not
+// a test, it is a decoration — and the canary said so.
+//
+// CapBnd is the BOUNDING set: the ceiling on what this process could EVER acquire, including
+// through a setuid binary. That ceiling is the actual sandbox guarantee, and it is zero only
+// because --cap-drop ALL made it zero.
+test('the sandbox holds no capabilities, and can never acquire any', { skip: noDocker }, async () => {
+  const r = await run({ lang: 'bash', code: 'grep -E "^Cap(Eff|Bnd)" /proc/self/status' });
+  assert.equal(r.exit_code, 0);
+  const eff = (r.stdout.match(/CapEff:\s*([0-9a-f]+)/) || [])[1];
+  const bnd = (r.stdout.match(/CapBnd:\s*([0-9a-f]+)/) || [])[1];
+  assert.ok(eff && bnd, `could not read the capability sets, got: ${JSON.stringify(r.stdout)}`);
+  assert.match(eff, /^0+$/, `the sandbox holds capabilities (CapEff=${eff})`);
+  assert.match(bnd, /^0+$/,
+    `the sandbox could still ACQUIRE capabilities (CapBnd=${bnd}) — --cap-drop ALL is not doing its job`);
+});
