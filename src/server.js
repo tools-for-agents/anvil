@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, extname, normalize, isAbsolute } from 'node:path';
+import { dirname, join, extname, normalize, isAbsolute, sep } from 'node:path';
 import { recentRuns, getRun, diffRuns, logRun, deleteRun, clearRuns, stats } from './log.js';
 import { run, dockerStatus } from './run.js';
 
@@ -80,7 +80,12 @@ function readBody(req) {
 async function serveStatic(res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
   const filePath = normalize(join(PUBLIC, rel));
-  if (!filePath.startsWith(PUBLIC)) { res.writeHead(403); return res.end('forbidden'); }
+  // startsWith(PUBLIC) alone lets a SIBLING directory through: if PUBLIC is /app/public, then
+  // /app/public-secrets/keys.txt also startsWith('/app/public'). A request path of
+  // `/../public-secrets/keys.txt` resolves to exactly that and sailed past the guard. Require the
+  // path separator, so "inside PUBLIC" means inside it and not merely next to something spelled
+  // like it. (iris had the same bug one file over; this is the same fix, kit-wide.)
+  if (filePath !== PUBLIC && !filePath.startsWith(PUBLIC + sep)) { res.writeHead(403); return res.end('forbidden'); }
   try {
     const data = await readFile(filePath);
     res.writeHead(200, { 'Content-Type': MIME[extname(filePath)] || 'application/octet-stream' });
