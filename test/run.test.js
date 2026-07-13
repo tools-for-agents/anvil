@@ -24,7 +24,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { PRESETS, run } from '../src/run.js';
+import { PRESETS, run, safeJoin } from '../src/run.js';
 
 test('PRESETS map languages to images and commands', () => {
   assert.equal(PRESETS.python.image, 'python:3.12-alpine');
@@ -287,4 +287,32 @@ test('the sandbox holds no capabilities, and can never acquire any', { skip: noD
   assert.match(eff, /^0+$/, `the sandbox holds capabilities (CapEff=${eff})`);
   assert.match(bnd, /^0+$/,
     `the sandbox could still ACQUIRE capabilities (CapBnd=${bnd}) — --cap-drop ALL is not doing its job`);
+});
+
+// THE FILE MAP IS WRITTEN TO THE HOST BEFORE THE CONTAINER STARTS — so its guard is host-side.
+//
+// An agent hands anvil a `files` map to materialize into the sandbox work dir. The KEYS are the
+// caller's, and safeJoin() decides where each one lands ON THE HOST, before Docker is ever invoked.
+// A key like `../../etc/cron.d/evil` is an attempt to write attacker-chosen bytes outside the work
+// dir; if it slips past, Docker never sees it because the damage is already done on the host.
+//
+// This needs NO Docker — it is a pure path check — so it does not carry the docker skip. A security
+// test gated on the very dependency the guard runs BEFORE would never run on a box without it.
+test('safeJoin refuses to write outside the work directory, however the path is spelled', () => {
+  const base = '/tmp/anvil-work-abc123';
+
+  // the safe case still works
+  assert.equal(safeJoin(base, 'main.py'), `${base}/main.py`, 'an ordinary filename lands inside');
+  assert.equal(safeJoin(base, 'sub/dir/f.txt'), `${base}/sub/dir/f.txt`, 'and so does a nested one');
+
+  for (const rel of [
+    '../escape.txt',                 // one level up
+    '../../../../etc/cron.d/evil',   // straight out to a host dir
+    '/etc/passwd',                   // absolute path
+    'a/../../escape',                // sneaks up after descending
+    '../anvil-work-abc123-evil/f',   // the SIBLING-PREFIX hole: starts with base, is not inside it
+  ]) {
+    assert.throws(() => safeJoin(base, rel), /unsafe file path/,
+      `must refuse to write outside the work dir: ${JSON.stringify(rel)}`);
+  }
 });

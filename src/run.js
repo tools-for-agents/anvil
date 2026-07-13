@@ -4,7 +4,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, resolve, isAbsolute, normalize } from 'node:path';
+import { join, dirname, resolve, isAbsolute, normalize, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 // Language presets: lang → { image, file, cmd(file) }
@@ -68,9 +68,17 @@ function maybeLog(opts, result) {
   import('./log.js').then((m) => { try { m.logRun({ opts, result }); } catch {} }).catch(() => {});
 }
 
-function safeJoin(base, rel) {
+// The caller controls the `files` map — including the keys — and these get written to the HOST
+// filesystem, BEFORE the container starts. So a key like `../../etc/cron.d/evil` is an attempt to
+// write attacker-chosen bytes outside the sandbox's work dir, and it must be refused here, not left
+// to Docker (by the time Docker runs, the file is already on the host).
+//
+// `startsWith(base)` alone is the sibling-directory hole I fixed in the five web servers: base
+// /tmp/anvil-abc also prefixes /tmp/anvil-abc-evil, so `../anvil-abc-evil/f` would slip through.
+// Require the separator — inside the work dir, not merely spelled like it.
+export function safeJoin(base, rel) {
   const p = normalize(join(base, rel));
-  if (isAbsolute(rel) || !p.startsWith(base)) throw new Error(`unsafe file path: ${rel}`);
+  if (isAbsolute(rel) || (p !== base && !p.startsWith(base + sep))) throw new Error(`unsafe file path: ${rel}`);
   return p;
 }
 

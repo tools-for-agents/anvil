@@ -41,6 +41,12 @@ const CANARIES = [
     find: "      '--cap-drop', 'ALL',",
     into: "      '--label', 'anvil=1',",
   },
+  {
+    why: 'safeJoin guards the HOST filesystem — a caller file key must not escape the work dir before the container starts',
+    file: 'src/run.js',
+    find: '  if (isAbsolute(rel) || (p !== base && !p.startsWith(base + sep))) throw new Error(`unsafe file path: ${rel}`);',
+    into: '  if (false) throw new Error(`unsafe file path: ${rel}`);',
+  },
 ];
 
 // spawnSync returns status:null when IT kills the child for exceeding the timeout — a TIMEOUT,
