@@ -47,6 +47,12 @@ const CANARIES = [
     find: '  if (isAbsolute(rel) || (p !== base && !p.startsWith(base + sep))) throw new Error(`unsafe file path: ${rel}`);',
     into: '  if (false) throw new Error(`unsafe file path: ${rel}`);',
   },
+  {
+    why: 'a run that fails to LOG must still SAY so — swallowed, the run vanished from the history and nothing said why (silence is not the same as non-fatal)',
+    file: 'src/run.js',
+    find: '    .catch(warn);',
+    into: '    .catch(() => {});',
+  },
 ];
 
 // spawnSync returns status:null when IT kills the child for exceeding the timeout — a TIMEOUT,

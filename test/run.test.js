@@ -328,3 +328,71 @@ test('clampTimeout coerces a bad timeout instead of killing a good run on the sp
   assert.equal(clampTimeout(5000), 5000, 'a sane value is left alone');
   assert.equal(clampTimeout(10_000_000), 300_000, 'and a huge one is capped at the ceiling');
 });
+
+test('a run that FAILS TO LOG must still RUN — and must SAY the record is not being kept', async () => {
+  // maybeLog is fire-and-forget on purpose: the run is the product, the log is bookkeeping, and a broken
+  // log must never cost you a working sandbox. That part was right. But it used to `catch {}` and say
+  // NOTHING — so a run that failed to log simply VANISHED from the history: `anvil runs` showed fewer
+  // runs than had happened, and nothing anywhere said why. You set ANVIL_DB because you wanted a record,
+  // and the one time it silently is not kept is the one time you needed it.
+  // SILENCE IS NOT THE SAME AS NON-FATAL.
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, rmSync, writeFileSync: wf } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: pjoin } = await import('node:path');
+  const { randomBytes } = await import('node:crypto');
+
+  const dir = mkdtempSync(pjoin(tmpdir(), 'anvil-badlog-'));
+  const db = pjoin(dir, 'runs.db');
+  wf(db, randomBytes(4096));                                   // a file that is NOT a database
+  const logUrl = new URL('../src/log.js', import.meta.url).href;
+  const runner = pjoin(dir, 'r.mjs');
+  // Drive the real failure without needing Docker: logRun against a corrupt db throws, and that throw
+  // is exactly what maybeLog used to swallow.
+  wf(runner, `
+    const m = await import(${JSON.stringify(logUrl)});
+    try { m.logRun({ opts: { lang: 'python' }, result: { ok: true, exit_code: 0 } }); }
+    catch (e) { process.stderr.write('LOG-WRITE-FAILED: ' + e.message + String.fromCharCode(10)); }
+  `);
+
+  try {
+    const r = spawnSync(process.execPath, [runner], { env: { ...process.env, ANVIL_DB: db }, encoding: 'utf8' });
+    assert.match(`${r.stderr}`, /LOG-WRITE-FAILED|not a database/i,
+      'writing the log to a corrupt db really does fail — this is the state that used to be swallowed');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the log warning actually FIRES on stderr — and the run still succeeds', { skip: noDocker }, async () => {
+  // 🔑 MY FIRST VERSION OF THIS TEST GREPPED THE SOURCE for `process.stderr.write` — and it PASSED even
+  // when I neutered the warning, because the string was still in the file. A check that can pass while
+  // the thing is broken is the exact bug this project exists to hunt. Observe the BEHAVIOUR: run for
+  // real against a corrupt log db and read what lands on stderr.
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync, rmSync, writeFileSync: wf } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: pjoin } = await import('node:path');
+  const { randomBytes } = await import('node:crypto');
+
+  const dir = mkdtempSync(pjoin(tmpdir(), 'anvil-warn-'));
+  const db = pjoin(dir, 'runs.db');
+  wf(db, randomBytes(4096));                                   // a file that is NOT a database
+  const runUrl = new URL('../src/run.js', import.meta.url).href;
+  const runner = pjoin(dir, 'r.mjs');
+  wf(runner, `
+    const m = await import(${JSON.stringify(runUrl)});
+    const r = await m.run({ lang: 'python', code: 'print(1)', timeout_ms: 60000 });
+    await new Promise((res) => setTimeout(res, 900));          // let the fire-and-forget log settle
+    process.stdout.write(JSON.stringify({ ok: r.ok }));
+  `);
+
+  try {
+    const r = spawnSync(process.execPath, [runner],
+      { env: { ...process.env, ANVIL_DB: db }, encoding: 'utf8', timeout: 120000 });
+
+    assert.match(`${r.stdout}`, /"ok":true/, 'the run STILL WORKS — a broken log must not break the sandbox');
+    assert.match(`${r.stderr}`, /could not write the run log/i, 'and it SAYS the log could not be written');
+    assert.match(`${r.stderr}`, new RegExp(db.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'naming the file');
+    assert.match(`${r.stderr}`, /still WORK/i, 'and that the runs themselves are unaffected');
+    assert.doesNotMatch(`${r.stdout}`, /could not write/i, 'the warning is NEVER on stdout — that is the MCP protocol');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

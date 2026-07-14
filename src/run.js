@@ -67,10 +67,31 @@ export function dockerAvailable() {
 }
 
 // Opt-in run logging: when ANVIL_DB is set, record the run for `anvil serve`.
-// Fire-and-forget and fully guarded — logging must never break or slow a run.
+// Fire-and-forget and fully guarded — logging must never break or slow a run. That part is right: the
+// run is the product, the log is bookkeeping, and a broken log must not cost you a working sandbox.
+//
+// 🔑 BUT SILENCE IS NOT THE SAME AS NON-FATAL. This used to `catch {}` and say nothing, so a run that
+// FAILED TO LOG simply vanished from the history: `anvil runs` showed fewer runs than had happened, and
+// nothing anywhere said why. You set ANVIL_DB because you wanted a record — and the one time the record
+// silently isn't kept is the one time you needed it. Warn, do not throw. (stderr, never stdout: stdout
+// is the MCP protocol, and one stray line on it desyncs the session.)
+let _warned = false;
 function maybeLog(opts, result) {
   if (!process.env.ANVIL_DB) return;
-  import('./log.js').then((m) => { try { m.logRun({ opts, result }); } catch {} }).catch(() => {});
+  const warn = (e) => {
+    if (_warned) return;            // once per process — a warning repeated 400 times is noise, not news
+    _warned = true;
+    process.stderr.write(`anvil: could not write the run log at ${process.env.ANVIL_DB} — ${e.message || e}\n`
+      + `  Your runs still WORK; they are just not being recorded. Further log failures are silent.\n`);
+  };
+  // ONE warn path, not two. Every realistic failure — a corrupt db, an unwritable path, a schema
+  // conflict — throws when log.js is imported (it opens the db at module load), before logRun even
+  // runs; and if logRun itself throws, the rejected promise lands on the same .catch. An inner
+  // try/catch that warned separately was redundant AND untestable — the reachable failures never hit
+  // it. One path is one thing to test, and nothing is swallowed in silence.
+  import('./log.js')
+    .then((m) => m.logRun({ opts, result }))
+    .catch(warn);
 }
 
 // The caller controls the `files` map — including the keys — and these get written to the HOST
