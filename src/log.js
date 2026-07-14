@@ -9,9 +9,10 @@ import { randomUUID } from 'node:crypto';
 const DB_PATH = process.env.ANVIL_DB || './.anvil/runs.db';
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
-export const db = new DatabaseSync(DB_PATH);
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec(`
+// Block this thread for `ms`. Opening the database is synchronous, so a retry has to be too.
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+const SCHEMA = `
 CREATE TABLE IF NOT EXISTS runs (
   id          TEXT PRIMARY KEY,
   ts          TEXT NOT NULL,
@@ -32,7 +33,36 @@ CREATE TABLE IF NOT EXISTS runs (
   error       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_ts ON runs(ts DESC);
-`);
+`;
+
+// 🔑 WAL LETS READERS AND A WRITER COEXIST. IT DOES NOTHING FOR TWO WRITERS. Without busy_timeout the
+// second writer does not WAIT for the lock — it fails INSTANTLY with SQLITE_BUSY. anvil's log is
+// written by the CLI, the MCP server and the web view, which are three separate processes; measured
+// on cortex (same store shape), two concurrent writers lost 45 of 60 writes. And busy_timeout does
+// not save the OPEN itself — `PRAGMA journal_mode = WAL` takes a brief exclusive lock and SQLite
+// answers SQLITE_BUSY for it immediately — so the open retries, and the schema goes up atomically.
+function openDb() {
+  for (let attempt = 0; ; attempt++) {
+    let d;
+    try {
+      d = new DatabaseSync(DB_PATH);
+      d.exec('PRAGMA busy_timeout = 5000;');
+      d.exec('PRAGMA journal_mode = WAL;');
+      d.exec('BEGIN IMMEDIATE;');
+      d.exec(SCHEMA);
+      d.exec('COMMIT;');
+      return d;
+    } catch (e) {
+      try { d?.close(); } catch { /* already gone */ }
+      // Only a lock is worth retrying — a loop that hides a real fault is worse than the fault.
+      if (attempt >= 40 || !/lock|busy/i.test(e.message)) throw e;
+      sleepSync(25);
+    }
+  }
+}
+
+export const db = openDb();
+
 
 const get = (sql, ...a) => db.prepare(sql).get(...a);
 const all = (sql, ...a) => db.prepare(sql).all(...a);

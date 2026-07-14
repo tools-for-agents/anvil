@@ -19,7 +19,7 @@
 // Each canary must have EXACTLY ONE anchor. An anchor that has drifted is a canary that
 // silently stopped watching, so a missing or ambiguous anchor is a hard failure, never a skip.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const CANARIES = [
@@ -62,6 +62,37 @@ const run = () => {
   const skipped = +(`${r.stdout || ''}${r.stderr || ''}`.match(/^\s*(?:ℹ|#)\s*skipped\s+(\d+)/m)?.[1] || 0);
   return { failed: r.status !== 0, timedOut: r.signal === 'SIGTERM' || r.error?.code === 'ETIMEDOUT', skipped };
 };
+
+// 🔑 AND IT MUST NOT RUN TWICE AT ONCE. This tool EDITS YOUR SOURCE IN PLACE, so two concurrent runs
+// do not merely confuse each other — they can make a planted bug PERMANENT:
+//
+//     run B plants a mutation in core.js
+//     run A reads core.js as its "original"      ← the original now CONTAINS B's bug
+//     run B restores its own copy
+//     run A restores ITS "original"              ← re-plants B's bug, and A believes it cleaned up
+//
+// The sabotage is now in your tree, no process is left to undo it, and the tool that put it there
+// reports success. It is not theoretical: two overlapping runs turned this repo's suite red, and the
+// only message was "THE SUITE IS ALREADY RED" — which names neither the file nor the line.
+// An exclusive lock, taken BEFORE the baseline (a concurrent run poisons the baseline too).
+const LOCK = new URL('../.mutants.lock', import.meta.url);
+try {
+  writeFileSync(LOCK, String(process.pid), { flag: 'wx' });   // wx = fail if it already exists
+} catch {
+  let holder = '?';
+  try { holder = readFileSync(LOCK, 'utf8').trim(); } catch { /* raced with a clean exit */ }
+  const alive = holder !== '?' && (() => { try { process.kill(+holder, 0); return true; } catch { return false; } })();
+  if (alive) {
+    console.error(`another mutants run (pid ${holder}) is already editing this source tree. `
+      + 'Two at once can make a planted bug PERMANENT — see the note above. Wait for it, or kill it.');
+    process.exit(1);
+  }
+  // The holder is gone (killed before it could clean up). Its restore-on-exit ran, so the tree is
+  // sound; the lock is just litter. Take it.
+  writeFileSync(LOCK, String(process.pid));
+}
+const dropLock = () => { try { unlinkSync(LOCK); } catch {} };
+process.on('exit', dropLock);
 
 // The baseline must be GREEN, or every canary "dies" for free and this job proves nothing.
 console.log('baseline…');

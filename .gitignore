@@ -4,3 +4,4 @@ node_modules/
 .anvil/
 *.db
 *.db-*
+.mutants.lock
