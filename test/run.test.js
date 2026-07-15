@@ -58,6 +58,21 @@ test('collect caps output and marks it truncated', async () => {
   assert.match(out, /truncated/, 'and said it was truncated — never a silent cut');
 });
 
+// Docker-free: the lang is resolved before any container starts. The CLI names an unknown lang, but the
+// CORE (the MCP path, anvil_run_code) fell through to "nothing to run: provide cmd, or lang+code" — which
+// sends an agent hunting for the cmd it already provided, when the real problem is the lang is unsupported.
+test('an unknown lang is named, not reported as "nothing to run"', async () => {
+  const r = await run({ lang: 'ruby', code: 'puts 1', noLog: true });
+  assert.match(r.error, /unknown lang "ruby"/, 'it names the unsupported lang');
+  assert.match(r.error, /python/, 'and lists the presets that DO exist');
+  // Over-fire guards: no lang at all keeps the generic error, and an explicit cmd bypasses the lang check.
+  const noLang = await run({ code: 'x', noLog: true });
+  assert.match(noLang.error, /nothing to run/, 'no lang → the generic error');
+  assert.doesNotMatch(noLang.error, /unknown lang/, 'not the unknown-lang one');
+  const withCmd = await run({ lang: 'ruby', cmd: 'true', noLog: true });
+  assert.ok(!withCmd.error || !/unknown lang/.test(withCmd.error), 'an explicit cmd runs regardless of an unknown lang');
+});
+
 const probe = spawnSync('docker', [
   'run', '--rm', '--network', 'none',
   '--memory', '512m', '--memory-swap', '512m', '--cpus', '1',

@@ -145,6 +145,11 @@ export function run(opts = {}) {
       const p = PRESETS[lang];
       image = image || p.image;
       if (code != null) { files = { ...files, [p.file]: code }; cmd = cmd || p.cmd(p.file); }
+    } else if (lang && !cmd) {
+      // A lang that is not a preset, with no explicit cmd to fall back to, is a MISTAKE — not "nothing to
+      // run". The CLI already says so; the core (the MCP path, anvil_run_code) fell through to the generic
+      // error and sent an agent hunting for the cmd it already provided. Name the bad lang and the real ones.
+      return resolveP({ ok: false, error: `unknown lang "${lang}" — presets: ${Object.keys(PRESETS).join(', ')} (or pass cmd + image to run something custom)` });
     }
     if (!image) image = 'alpine:3.20';
     if (!cmd) return resolveP({ ok: false, error: 'nothing to run: provide cmd, or lang+code' });

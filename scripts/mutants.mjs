@@ -59,6 +59,12 @@ const CANARIES = [
     find: '    .catch(warn);',
     into: '    .catch(() => {});',
   },
+  {
+    why: 'an unknown lang is NAMED — without this branch the core (the MCP path) sends an agent hunting for the cmd it already provided ("nothing to run") when the real problem is the lang is unsupported',
+    file: 'src/run.js',
+    find: '    } else if (lang && !cmd) {',
+    into: '    } else if (false) {',
+  },
 ];
 
 // spawnSync returns status:null when IT kills the child for exceeding the timeout — a TIMEOUT,
