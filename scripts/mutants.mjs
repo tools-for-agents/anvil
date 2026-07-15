@@ -24,6 +24,12 @@ import { spawnSync } from 'node:child_process';
 
 const CANARIES = [
   {
+    why: 'output is decoded as a UTF-8 STREAM — without setEncoding a multi-byte char (emoji/CJK/accent) split across a docker chunk boundary is mojibake in the output AND the live stream',
+    file: 'src/run.js',
+    find: "  stream.setEncoding('utf8');",
+    into: '  void 0;',
+  },
+  {
     why: 'the sandbox has NO NETWORK — the whole point of running code you did not write',
     file: 'src/run.js',
     find: "      '--network', network === 'on' ? 'bridge' : 'none',",

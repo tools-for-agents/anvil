@@ -24,12 +24,38 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { PRESETS, run, safeJoin, clampTimeout } from '../src/run.js';
+import { PassThrough } from 'node:stream';
+import { PRESETS, run, safeJoin, clampTimeout, collect } from '../src/run.js';
 
 test('PRESETS map languages to images and commands', () => {
   assert.equal(PRESETS.python.image, 'python:3.12-alpine');
   assert.equal(PRESETS.node.cmd('main.js'), 'node main.js');
   assert.equal(PRESETS.bash.cmd('main.sh'), 'sh main.sh');
+});
+
+// Docker-free: the decode is pure. docker splits a container's output at arbitrary BYTE offsets,
+// including in the MIDDLE of a multi-byte character. Feeding one byte at a time is the most
+// adversarial chunking a stream can produce; every character must still come back whole.
+test('collect decodes multi-byte output split across chunks — no mojibake at the seam', async () => {
+  const want = '🔥 café 你好 — ✅';          // emoji (4B), accented (2B), CJK (3B), all mid-char splittable
+  const bytes = Buffer.from(want, 'utf8');
+  const s = new PassThrough();
+  const seen = [];
+  const get = collect(s, 'stdout', (_k, d) => seen.push(String(d)), 200_000);
+  for (const b of bytes) s.write(Buffer.from([b]));   // one byte per chunk — worst case
+  await new Promise((res) => { s.on('end', res); s.end(); });
+  assert.equal(get(), want, 'the collected output is exactly what the container printed');
+  assert.equal(seen.join(''), want, 'and each LIVE-streamed chunk is a valid string, never a split character');
+});
+
+test('collect caps output and marks it truncated', async () => {
+  const s = new PassThrough();
+  const get = collect(s, 'stdout', () => {}, 10);
+  s.write('0123456789ABCDEFGH');
+  await new Promise((res) => { s.on('end', res); s.end(); });
+  const out = get();
+  assert.ok(out.startsWith('0123456789'), 'kept the first cap chars');
+  assert.match(out, /truncated/, 'and said it was truncated — never a silent cut');
 });
 
 const probe = spawnSync('docker', [

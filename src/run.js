@@ -23,6 +23,27 @@ const MAX_TIMEOUT = 300_000;
 // value kills a perfectly good run on the spot and reports it as a timeout. Coerce to the default
 // first (`|| 30_000` catches NaN and 0), then clamp to [1000, MAX_TIMEOUT].
 export const clampTimeout = (ms) => Math.min(Math.max(1000, +ms || 30_000), MAX_TIMEOUT);
+
+// Collect a child process stream into a capped, UTF-8-decoded string. setEncoding is LOAD-BEARING:
+// without it each `data` chunk arrives as a Buffer decoded on its own, so a multi-byte character
+// (an emoji, 你好, café) split across a chunk boundary — which docker does, at arbitrary byte offsets —
+// becomes mojibake at the seam, in BOTH the returned output AND the live onData stream. Node's
+// StringDecoder (via setEncoding) holds the incomplete tail bytes until the character is whole.
+// Exported so the decode can be exercised without a container (docker is not needed to test bytes).
+export function collect(stream, kind, onChunk, cap) {
+  stream.setEncoding('utf8');
+  let text = '', truncated = false;
+  stream.on('data', (d) => {
+    onChunk(kind, d);
+    // Cap the KEPT text and SAY when we cut — never a silent truncation. The old form only set the
+    // flag when a chunk arrived AFTER the cap was already reached, so a single chunk larger than the
+    // cap was trimmed with no marker at all. Check the length we actually hold.
+    if (truncated) return;
+    text += d;
+    if (text.length > cap) { text = text.slice(0, cap); truncated = true; }
+  });
+  return () => text + (truncated ? '\n…[truncated]' : '');
+}
 // Pulling an image is not running code, so it gets its own, generous clock.
 const PULL_TIMEOUT = 300_000;
 
@@ -202,21 +223,15 @@ export function run(opts = {}) {
     const logOpts = { lang: opts.lang, code, cmd, image, network, mem, cpus, timeout_ms };
     const started = Date.now();
     const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    let out = '', err = '', outTrunc = false, errTrunc = false, timedOut = false;
+    let timedOut = false;
 
     // The container's output already arrives in chunks — anvil just buffered it and
     // said nothing until the end. onData hands each chunk out as it is written, so a
     // caller can watch a run happen instead of staring at a spinner. Optional, and
     // guarded: a listener that throws must not take the run down with it.
     const emit = (stream, d) => { if (!onData) return; try { onData(stream, String(d)); } catch {} };
-    child.stdout.on('data', (d) => {
-      emit('stdout', d);
-      if (out.length < MAX_OUTPUT) out += d; else outTrunc = true;
-    });
-    child.stderr.on('data', (d) => {
-      emit('stderr', d);
-      if (err.length < MAX_OUTPUT) err += d; else errTrunc = true;
-    });
+    const getOut = collect(child.stdout, 'stdout', emit, MAX_OUTPUT);
+    const getErr = collect(child.stderr, 'stderr', emit, MAX_OUTPUT);
     if (stdin != null) { try { child.stdin.write(String(stdin)); } catch {} }
     try { child.stdin.end(); } catch {}
 
@@ -235,8 +250,8 @@ export function run(opts = {}) {
         timed_out: timedOut,
         duration_ms: Date.now() - started,
         image,
-        stdout: out.slice(0, MAX_OUTPUT) + (outTrunc ? '\n…[truncated]' : ''),
-        stderr: err.slice(0, MAX_OUTPUT) + (errTrunc ? '\n…[truncated]' : ''),
+        stdout: getOut(),
+        stderr: getErr(),
       };
       if (!opts.noLog) maybeLog(logOpts, result);
       resolveP(result);
