@@ -90,6 +90,14 @@ jobs:
           name: anvil
           tokens: kit      # the kit's ONE design system — iris/tokens.json, not a copy
           strict: true     # drift is a regression now; a gate is what keeps it from creeping back
+          # A HOVER STATE IS CSS NOBODY HAS EVER LOOKED AT — and this page is made of them.
+          # Every row raises under the pointer (.run:hover paints --panel-2), and the ink on it
+          # did not survive the lift: "ok · exit 0" read 4.42:1 and the red "failed" pill 4.41:1,
+          # on every row of the log, in a build that was green. JS cannot pose :hover — it is the
+          # browser's own — so no gate in this kit could see any of it until iris learned to force
+          # it. It matched nothing here for four selectors that live on a run's detail; those are
+          # look-detail's, below, and iris names them rather than passing quietly.
+          hover: '.filters button, .filters button.clear-btn, .new-run-btn, .rm-add, .rm-del, .rm-mode, .rm-preset, .rm-run, .run, .modal-x, .xtk a'
 
   # THE EMPTY STATE IS THE ONE STATE EVERY USER SEES FIRST — AND NOTHING WAS LOOKING AT IT.
   #
@@ -103,6 +111,49 @@ jobs:
   # store. A brand-new user's very first command died. The tests seed, the gate seeds, and
   # my own machine has had a cache for weeks — so the bug lived in a state nothing here
   # ever entered.
+  # 🔑 A RUN'S DETAIL — THE THING THIS TOOL IS FOR — WAS RENDERED BY NOTHING.
+  #
+  # anvil exists to run code in a sandbox and show you what happened: the command, the
+  # stdout, the stderr, the exit code. That view needs a run to be SELECTED, and no job
+  # here ever clicked one. `look` audits the log; `states` poses .blocked/.off on the log;
+  # `first-run` audits the empty log. The panel with the answer in it shipped unseen.
+  #
+  # And selection is not free: .run.active paints --panel-3, the most-raised surface in the
+  # app, and the subtitle on it read 4.09:1 — the row you SELECT was the one you could not
+  # read. Hover made it 4.42:1 on every other row at the same time.
+  #
+  # A FAILED run on purpose: a red pill on a raised row is the worst case this app draws,
+  # and "select whatever is first" would have graded a green one and called it covered.
+  look-detail:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Serve it, THEN prove there is a FAILED run to open
+        run: |
+          ANVIL_DB=./.anvil/runs.db node scripts/seed.js
+          ANVIL_DB=./.anvil/runs.db node src/cli.js serve &
+          for i in $(seq 30); do curl -sf http://localhost:7930/api/stats >/dev/null && break; sleep 1; done
+          f=$(curl -sf http://localhost:7930/api/stats | node -pe "JSON.parse(require('fs').readFileSync(0)).failed ?? 0")
+          echo "failed runs the gate can select: $f"
+          test "$f" -gt 0 || { echo "::error::the seed has no failed run — iris would grade a green pill and call the red one covered"; exit 1; }
+      - uses: tools-for-agents/iris@main
+        with:
+          url: http://localhost:7930/
+          viewports: phone,tablet,desktop
+          name: anvil-detail
+          tokens: kit
+          strict: true
+          # Poll for the condition, do not bet on a duration: setTimeout(1500) is a wager on the
+          # runner being idle, and it is why a sibling gate in this kit fails on a loaded laptop
+          # and passes here. A --pre that throws makes iris say "the state was never reached and
+          # NOTHING was audited" instead of grading the log again and calling it a detail view.
+          pre: >-
+            const until=async(f,ms,what)=>{const t=Date.now()+ms;while(Date.now()<t){if(f())return true;await new Promise(r=>setTimeout(r,100));}throw new Error('waited '+ms+'ms and '+what);};await until(()=>document.querySelector('.run[data-id]'),20000,'the forge log rendered NO runs — a detail view starts at a run');const failed=[...document.querySelectorAll('.run[data-id]')].find(r=>/fail|error/i.test(r.getAttribute('aria-label')||''));if(!failed) throw new Error('no FAILED run in the log to select — a red pill on a raised row is the case this gate exists for');failed.click();await until(()=>document.querySelector('.rerun-btn, .del-btn'),20000,'clicking a run did not open its detail')
+          hover: '.filters button, .filters button.clear-btn, .new-run-btn, .rm-add, .rm-del, .rm-mode, .rm-preset, .rm-run, .run, .modal-x, .xtk a, .brain-btn, .del-btn, .rerun-btn, .sect-l .copy-btn'
+
   first-run:
     runs-on: ubuntu-latest
     steps:
