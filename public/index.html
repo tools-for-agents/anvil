@@ -198,7 +198,20 @@
   @keyframes lvp { 0%,100% { opacity:.25; } 50% { opacity:1; } }
   #lv-out { min-height:120px; max-height:52vh; overflow:auto; white-space:pre-wrap; word-break:break-word; }
   #lv-out .lv-err { color:var(--fail); }
-  @media (prefers-reduced-motion:reduce) { .d-status .pulse { animation:none; opacity:.8; } }
+  /* 🔑 THIS BLOCK COVERED THE PULSE AND FORGOT THE MODAL, AND SO DID agent-hq — THE SAME TWO
+     ANIMATIONS, BY THE SAME TWO NAMES (`mfade`/`mrise`), BECAUSE THE MODAL WAS COPIED BETWEEN THEM.
+     The omission was copied with it. The infinite pulse is the obvious one to switch off; a .12s
+     entrance reads as harmless and is exactly what a vestibular reader asked not to have, and it is
+     also what makes an audit nondeterministic — agent-hq's fade had iris reporting the same text at
+     4.49, then 4.09, then 4.17:1 on identical runs, because it graded a different frame each time.
+     Safe for all three: every one is an entrance or a pulse, none uses `forwards`/`both`, and each
+     keyframe's `to` IS the element's base state — so `animation:none` lands where it was going.
+     This block sits AFTER all three rules on purpose: same specificity, later wins. */
+  @media (prefers-reduced-motion:reduce) {
+    .d-status .pulse { animation:none; opacity:.8; }
+    .modal-backdrop { animation:none; }
+    .modal { animation:none; }
+  }
   .chips { display:flex; gap: 8px; flex-wrap:wrap; margin: 16px 0 20px; }
   .chip { font-family:var(--mono); font-size:12px; color:var(--muted); background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding: 4px 8px; }
   .chip b { color:var(--txt); font-weight:600; }
