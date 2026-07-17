@@ -1029,7 +1029,10 @@ function diffChips(a, b) {
 function diffSection(title, ld) {
   if (!ld.rows.some((x) => x.l != null || x.r != null)) return '';   // both sides empty
   const badge = ld.identical ? '<span class="bytes">identical</span>' : `<span class="bytes">${ld.changed} line${ld.changed === 1 ? '' : 's'} differ</span>`;
-  return `<div class="sect-l">${title} ${badge}</div>
+  // A capped diff must say so — otherwise "12 lines differ" reads as the whole story when only the
+  // first 4000 lines of a much larger output were compared.
+  const cut = ld.truncated ? ' <span class="bytes" style="color:var(--warn,#e0a24e)">first 4000 lines only</span>' : '';
+  return `<div class="sect-l">${title} ${badge}${cut}</div>
     <div class="diff">${ld.rows.map((row) => `<div class="drow">
       <code class="dcell ${row.lc}">${row.l == null ? '' : (esc(row.l) || ' ')}</code>
       <code class="dcell ${row.rc}">${row.r == null ? '' : (esc(row.r) || ' ')}</code>

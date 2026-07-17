@@ -113,10 +113,24 @@ export function getRun(id) { return shape(get(`SELECT * FROM runs WHERE id=?`, i
 export function deleteRun(id) { return runq(`DELETE FROM runs WHERE id=?`, id).changes > 0; }
 export function clearRuns() { return runq(`DELETE FROM runs`).changes; }
 
-// LCS line diff → aligned rows [{ l, r, lc, rc }] where l/r are the left/right
-// line (or null for a gap) and lc/rc are 'same' | 'del' | 'add' | 'gap'.
+// 🔑 THE LCS MATRIX IS O(n×m), AND anvil DIFFS THE OUTPUT OF UNTRUSTED CODE. dp is an
+// (n+1)×(m+1) grid of Int32 — one cell per pair of lines. Stored streams are capped at 100K
+// CHARS, but nothing capped the LINE COUNT, and 100K chars can be 100K newlines: two such runs
+// make a 100K×100K matrix = 40 GB, and the tool that ran the snippet OOM-crashes. Measured
+// quadratic: 10K lines already 400 MB. A snippet that prints many newlines twice, then /api/diff,
+// is a one-line denial of service against the CLI, the MCP server and the web view alike.
+//
+// So cap the lines the matrix ever sees. 4000×4000 Int32 is 64 MB and ~50ms — a generous ceiling
+// for a diff a human reads (the web renders one row per line; 4000 rows is already a wall of
+// text), and pathological beyond it. A full LCS of 100K lines is not worth rescuing anyway: at
+// O(n×m) its TIME is ~10^10 ops even with linear-space Hirschberg, so there is no version of
+// "diff 100K×100K lines" that belongs in an interactive tool. Past the cap, diff the first 4000
+// of each and say so.
+const MAX_DIFF_LINES = 4000;
 export function lineDiff(aText, bText) {
-  const a = String(aText || '').split('\n'), b = String(bText || '').split('\n');
+  let a = String(aText || '').split('\n'), b = String(bText || '').split('\n');
+  const truncated = a.length > MAX_DIFF_LINES || b.length > MAX_DIFF_LINES;
+  if (truncated) { a = a.slice(0, MAX_DIFF_LINES); b = b.slice(0, MAX_DIFF_LINES); }
   const n = a.length, m = b.length;
   const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
   for (let i = n - 1; i >= 0; i--)
@@ -131,7 +145,8 @@ export function lineDiff(aText, bText) {
   }
   while (i < n) { rows.push({ l: a[i], r: null, lc: 'del', rc: 'gap' }); i++; changed++; }
   while (j < m) { rows.push({ l: null, r: b[j], lc: 'gap', rc: 'add' }); j++; changed++; }
-  return { rows, changed, identical: changed === 0 };
+  // truncated → the tail was not compared, so it cannot be called identical even if the head is.
+  return { rows, changed, identical: !truncated && changed === 0, truncated };
 }
 
 // Compare two logged runs: both records + line diffs of code / stdout / stderr.
