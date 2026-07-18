@@ -24,6 +24,19 @@ const MAX_TIMEOUT = 300_000;
 // first (`|| 30_000` catches NaN and 0), then clamp to [1000, MAX_TIMEOUT].
 export const clampTimeout = (ms) => Math.min(Math.max(1000, +ms || 30_000), MAX_TIMEOUT);
 
+// A container killed by a signal exits 128+n (POSIX). That number alone is opaque: 137 and 139 look
+// like ordinary failures but mean "force-killed" and "segfault" — and the run that hit them usually
+// printed NOTHING to stderr, because it was killed mid-word. Decode the code to the signal NAME so the
+// result still says HOW it died. Linux numbers, since every anvil container is Linux. null for a normal
+// exit (≤128 is a real program exit code, not a signal). Docker-free by construction, so it is unit-tested.
+const SIGNALS = { 1: 'SIGHUP', 2: 'SIGINT', 3: 'SIGQUIT', 4: 'SIGILL', 5: 'SIGTRAP', 6: 'SIGABRT',
+  7: 'SIGBUS', 8: 'SIGFPE', 9: 'SIGKILL', 11: 'SIGSEGV', 13: 'SIGPIPE', 15: 'SIGTERM' };
+export function signalName(code) {
+  if (!Number.isInteger(code) || code <= 128) return null;
+  const n = code - 128;
+  return SIGNALS[n] || `SIG${n}`;   // an unmapped signal is still named, never swallowed
+}
+
 // Collect a child process stream into a capped, UTF-8-decoded string. setEncoding is LOAD-BEARING:
 // without it each `data` chunk arrives as a Buffer decoded on its own, so a multi-byte character
 // (an emoji, 你好, café) split across a chunk boundary — which docker does, at arbitrary byte offsets —
@@ -258,6 +271,17 @@ export function run(opts = {}) {
         stdout: getOut(),
         stderr: getErr(),
       };
+      // Killed by a signal, and not by our own timeout? Name it — a bare 137/139 with empty stderr is a
+      // dead end. And for a SIGKILL, name the cause nobody guesses: under a memory cap it is almost always
+      // the OOM killer. Said as a likelihood, not a claim, with the fix in the sentence.
+      const sig = timedOut ? null : signalName(codeNum);
+      if (sig) {
+        result.signal = sig;
+        if (sig === 'SIGKILL') {
+          result.hint = `killed with SIGKILL — under anvil's ${mem} memory cap this is most often the `
+            + `out-of-memory killer; reduce the memory the code uses, or raise the memory limit.`;
+        }
+      }
       if (!opts.noLog) maybeLog(logOpts, result);
       resolveP(result);
     });

@@ -25,7 +25,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
-import { PRESETS, run, safeJoin, clampTimeout, collect } from '../src/run.js';
+import { PRESETS, run, safeJoin, clampTimeout, collect, signalName } from '../src/run.js';
 
 test('PRESETS map languages to images and commands', () => {
   assert.equal(PRESETS.python.image, 'python:3.12-alpine');
@@ -73,6 +73,21 @@ test('an unknown lang is named, not reported as "nothing to run"', async () => {
   assert.ok(!withCmd.error || !/unknown lang/.test(withCmd.error), 'an explicit cmd runs regardless of an unknown lang');
 });
 
+// Docker-free: the decode is pure arithmetic on the exit code (128+n), so it needs no container. A run
+// killed by a signal often prints nothing to stderr — it died mid-word — so this name is the ONLY thing
+// the result can say about how it died.
+test('signalName decodes a 128+n exit into the signal that killed the run', () => {
+  assert.equal(signalName(137), 'SIGKILL');    // the OOM killer, and `docker kill`
+  assert.equal(signalName(139), 'SIGSEGV');    // a segfault — native code, a stack blow
+  assert.equal(signalName(143), 'SIGTERM');
+  assert.equal(signalName(134), 'SIGABRT');
+  assert.equal(signalName(200), 'SIG72');      // unmapped, but still NAMED, never swallowed to null
+  assert.equal(signalName(0), null, 'a clean exit is not a signal');
+  assert.equal(signalName(1), null, 'an ordinary non-zero exit is not a signal');
+  assert.equal(signalName(128), null, 'the boundary is a real exit code, not a signal');
+  assert.equal(signalName('137'), null, 'a non-integer is not decoded into a bogus signal');
+});
+
 const probe = spawnSync('docker', [
   'run', '--rm', '--network', 'none',
   '--memory', '512m', '--memory-swap', '512m', '--cpus', '1',
@@ -94,6 +109,19 @@ test('run surfaces a non-zero exit code and stderr', { skip: noDocker }, async (
   const r = await run({ lang: 'bash', code: 'echo oops 1>&2; exit 3' });
   assert.equal(r.exit_code, 3);
   assert.match(r.stderr, /oops/);
+  assert.equal(r.signal, undefined, 'an ordinary non-zero exit carries no signal — that field means killed');
+});
+
+test('a signal-killed run names the signal, and a SIGKILL hints at OOM', { skip: noDocker }, async () => {
+  // The shell SIGKILLs itself → docker reports 137. This is the empty-stderr dead end the field exists for:
+  // nothing was printed, and 137 alone doesn't say "force-killed". (It also stands in for the OOM killer,
+  // which exits 137 the same way but is impossible to trigger fast and deterministically in CI.)
+  const r = await run({ image: 'alpine:3.20', cmd: 'kill -9 $$' });
+  assert.equal(r.timed_out, false, 'a signal kill is NOT our timeout — the two must not be conflated');
+  assert.equal(r.exit_code, 137);
+  assert.equal(r.signal, 'SIGKILL', 'the opaque 137 is decoded to the signal name');
+  assert.match(r.hint, /out-of-memory|memory/i, 'and a SIGKILL points at the cause nobody guesses');
+  assert.equal(r.ok, false);
 });
 
 test('run is network-isolated by default', { skip: noDocker }, async () => {

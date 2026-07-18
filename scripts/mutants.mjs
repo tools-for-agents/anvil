@@ -65,6 +65,12 @@ const CANARIES = [
     find: '    } else if (lang && !cmd) {',
     into: '    } else if (false) {',
   },
+  {
+    why: 'a signal-kill is decoded from 128+n — drop the offset and every code maps to the wrong signal (137 → SIG137, not SIGKILL), so the ONE clear fact about a stderr-less killed run is a lie',
+    file: 'src/run.js',
+    find: '  const n = code - 128;',
+    into: '  const n = code;',
+  },
 ];
 
 // spawnSync returns status:null when IT kills the child for exceeding the timeout — a TIMEOUT,
