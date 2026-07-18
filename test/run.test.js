@@ -113,10 +113,12 @@ test('run surfaces a non-zero exit code and stderr', { skip: noDocker }, async (
 });
 
 test('a signal-killed run names the signal, and a SIGKILL hints at OOM', { skip: noDocker }, async () => {
-  // The shell SIGKILLs itself → docker reports 137. This is the empty-stderr dead end the field exists for:
-  // nothing was printed, and 137 alone doesn't say "force-killed". (It also stands in for the OOM killer,
-  // which exits 137 the same way but is impossible to trigger fast and deterministically in CI.)
-  const r = await run({ image: 'alpine:3.20', cmd: 'kill -9 $$' });
+  // Produce docker's exit 137 the SAME way an OOM kill does — a process terminated by SIGKILL — without
+  // relying on an actual OOM (slow, and the killer's target is not deterministic). It can't be the shell
+  // itself: that is PID 1 in the container, and the kernel won't let PID 1 SIGKILL itself from inside its
+  // own namespace (kill -9 $$ there just returns and the shell exits 0). So SIGKILL a CHILD and wait it —
+  // `wait` reports a signal death as 128+n, so the run exits 137, exactly as the OOM killer would leave it.
+  const r = await run({ image: 'alpine:3.20', cmd: 'sleep 30 & p=$!; kill -9 $p; wait $p' });
   assert.equal(r.timed_out, false, 'a signal kill is NOT our timeout — the two must not be conflated');
   assert.equal(r.exit_code, 137);
   assert.equal(r.signal, 'SIGKILL', 'the opaque 137 is decoded to the signal name');
