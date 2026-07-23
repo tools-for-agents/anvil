@@ -163,8 +163,14 @@
   .run .sub { font-size:12px; color:var(--muted); margin-top: 4px; display:flex; gap: 8px; font-family:var(--mono); }
   .run .rt { text-align:right; font-family:var(--mono); font-size:12px; color:var(--muted); white-space:nowrap; }
   .run .st-pill { color:var(--st); font-weight:600; }
+  /* The banner prints the raw Docker error, which carries a long unbreakable URI
+     (unix:///…/docker.sock). As a grid item its min-width is that URI's width, so it
+     expanded the track and scrolled a phone 255px sideways — and "Docker isn't running"
+     is the FIRST thing many users hit. min-width:0 + overflow-wrap:anywhere let the URI
+     wrap instead. (Same shape as the iris/lens path overflows this session.) */
   .nodocker { grid-area:warn; padding: 12px 16px; border-bottom:1px solid var(--line);
-    background:color-mix(in srgb, var(--ember) 10%, var(--bg-2)); font-size:12px; line-height:1.6; }
+    background:color-mix(in srgb, var(--ember) 10%, var(--bg-2)); font-size:12px; line-height:1.6;
+    min-width:0; overflow-wrap:anywhere; }
   .nodocker[hidden] { display:none; }
   .nodocker b { color:var(--ember); font-weight:600; }
   .nodocker code { font-family:var(--mono); }
