@@ -50,6 +50,7 @@ function printResult(r) {
   anvil run <lang> -            read code from stdin
   anvil sh '<command>'          run a shell command in alpine
   anvil check                   docker + presets
+  anvil serve [--port 7930]     run-history dashboard (needs ANVIL_DB)
 
 Defaults: --network none, 512m memory, 1 cpu, caps dropped, 30s timeout.`);
 })();
