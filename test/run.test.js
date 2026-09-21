@@ -467,3 +467,176 @@ test('the log warning actually FIRES on stderr — and the run still succeeds', 
     assert.doesNotMatch(`${r.stdout}`, /could not write/i, 'the warning is NEVER on stdout — that is the MCP protocol');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ── THE CLI EXITED BEFORE ITS OWN RUN WAS RECORDED ──────────────────────────────
+//
+// Read the test above again: it hard-codes `await new Promise(res => setTimeout(res, 900))` to let
+// the fire-and-forget log settle — a settle the SHIPPED CLI never had. It drove a runner script it
+// wrote itself and never src/cli.js, so it could not see that `printResult` ended with
+// process.exit() fired the instant run() resolved: before the log's dynamic import had even loaded,
+// let alone inserted. Every `anvil run` / `anvil sh` was dropped. The `.anvil/` directory the README
+// tells you to set was never created. `anvil serve` then answered {"count":0,"runs":[]} with
+// `docker: ok` beside it — a well-formed zero that nothing distinguishes from "nothing ran". And
+// the warning above died on the same line, discarded with the same promise chain: the guard and the
+// thing it guarded failed together, which is exactly why it stayed invisible for so long.
+//
+// So drive the REAL BINARY, the way the README does, and then read the database. By its own
+// standard: "A check that can pass while the thing is broken is the exact bug this project exists
+// to hunt."
+//
+// Docker-free BY CONSTRUCTION, and deliberately so — a `docker` shim on PATH answers version /
+// image inspect and plays the container. The defect lives in the CLI's promise chain, not in the
+// container, and a test that skips wherever no daemon is running would not be watching on the
+// machine where it matters. (Same shim trick as the missing-Docker test above.)
+const FAKE_DOCKER = `#!/bin/sh
+case "$1" in
+  version) echo 0.0.0-fake; exit 0 ;;
+  image)   exit 0 ;;
+  run)     cat >/dev/null 2>&1; echo forged; exit \${FAKE_EXIT:-0} ;;
+esac
+exit 0
+`;
+
+test('the CLI has its run IN the log BEFORE it exits — process.exit() must not eat the write', async (t) => {
+  const { mkdtempSync, rmSync, writeFileSync: wf, chmodSync, existsSync, readdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: pjoin, resolve } = await import('node:path');
+  const { DatabaseSync } = await import('node:sqlite');
+
+  const cliPath = resolve(import.meta.dirname, '..', 'src', 'cli.js');
+  const dir = mkdtempSync(pjoin(tmpdir(), 'anvil-clilog-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const shim = pjoin(dir, 'docker');
+  wf(shim, FAKE_DOCKER);
+  chmodSync(shim, 0o755);
+
+  const db = pjoin(dir, '.anvil', 'runs.db');        // the README's shape: a dir anvil has to CREATE
+  const cli = (args, extra = {}) => {
+    const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, ANVIL_DB: db, ...extra };
+    return spawnSync(process.execPath, [cliPath, ...args], { cwd: dir, env, encoding: 'utf8', timeout: 60_000 });
+  };
+
+  const good = cli(['sh', 'echo forged']);
+  assert.equal(good.status, 0, 'the run itself succeeds');
+  const bad = cli(['sh', 'exit 3'], { FAKE_EXIT: '3' });
+  assert.equal(bad.status, 1, 'a failing run still exits non-zero — waiting for the log must not swallow the verdict');
+
+  assert.ok(existsSync(db),
+    `the CLI never even created the run log the README tells you to switch on (${db}) — ANVIL_DB was set for both runs`);
+  const d = new DatabaseSync(db);
+  const rows = d.prepare('SELECT cmd, ok, exit_code FROM runs ORDER BY id').all();
+  d.close();
+
+  assert.equal(rows.length, 2,
+    `both CLI runs must be in the forge log — found ${rows.length}. A run that happened and is not in the `
+    + `history is not a gap someone notices: every count computed from that log is then reported as fact`);
+  assert.deepEqual(rows.map((r) => r.cmd).sort(), ['echo forged', 'exit 3'],
+    'each run is recorded with the command that was actually run');
+  const failed = rows.find((r) => r.cmd === 'exit 3');
+  assert.equal(failed.ok, 0, 'the FAILING run is recorded as failed');
+  assert.equal(failed.exit_code, 3,
+    'with its exit code — the failing run is the one you go back to the log FOR, and it was the one being dropped');
+
+  // Over-fire guard: with ANVIL_DB unset, anvil is STATELESS. Waiting on the log must not conjure
+  // one, touch the working directory, or put a word on stderr about a log nobody asked for.
+  const plain = mkdtempSync(pjoin(tmpdir(), 'anvil-stateless-'));
+  t.after(() => rmSync(plain, { recursive: true, force: true }));
+  const env = { ...process.env, PATH: `${dir}:${process.env.PATH}` };
+  delete env.ANVIL_DB;
+  const off = spawnSync(process.execPath, [cliPath, 'sh', 'echo plain'], { cwd: plain, env, encoding: 'utf8', timeout: 60_000 });
+  assert.equal(off.status, 0, 'a stateless run still works');
+  assert.match(`${off.stdout}`, /forged/, 'and still prints what the container printed');
+  assert.deepEqual(readdirSync(plain), [], 'no ANVIL_DB → nothing is written anywhere: anvil is stateless by default');
+  assert.doesNotMatch(`${off.stderr}`, /run log/i, 'and it says nothing about a log that was never switched on');
+});
+
+test('when the log cannot be written, the SHIPPED CLI is the one that says so', async (t) => {
+  // The warning exists — test/run.test.js has asserted it for a long time — but it was UNREACHABLE
+  // from the binary users run: `.catch(warn)` sat on the promise chain that process.exit() threw
+  // away, so `anvil sh` against a corrupt log db printed its result and exited 0 in perfect silence.
+  // SILENCE IS NOT THE SAME AS NON-FATAL, and a guard that only fires in its own test is not a guard.
+  const { mkdtempSync, rmSync, writeFileSync: wf, chmodSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: pjoin, resolve } = await import('node:path');
+  const { randomBytes } = await import('node:crypto');
+
+  const cliPath = resolve(import.meta.dirname, '..', 'src', 'cli.js');
+  const dir = mkdtempSync(pjoin(tmpdir(), 'anvil-cliwarn-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const shim = pjoin(dir, 'docker');
+  wf(shim, FAKE_DOCKER);
+  chmodSync(shim, 0o755);
+
+  const db = pjoin(dir, 'runs.db');
+  wf(db, randomBytes(4096));                                   // a file that is NOT a database
+
+  const r = spawnSync(process.execPath, [cliPath, 'sh', 'echo forged'], {
+    cwd: dir, encoding: 'utf8', timeout: 60_000,
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ANVIL_DB: db },
+  });
+
+  assert.equal(r.status, 0, 'the run STILL WORKS — a broken log must never cost you a working sandbox');
+  assert.match(`${r.stdout}`, /forged/, 'and you still get its output');
+  assert.match(`${r.stderr}`, /could not write the run log/i,
+    'but the CLI SAYS the record is not being kept — the one time it silently is not is the time you needed it');
+  assert.match(`${r.stderr}`, new RegExp(db.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'naming the file it could not write');
+  assert.doesNotMatch(`${r.stdout}`, /could not write/i, 'never on stdout — that stream is the MCP protocol');
+});
+
+// ── AND THE MESSAGE ABOUT THE LOSS MUST NOT BE ITS OWN LIE ──────────────────────
+//
+// The exit guard above prints a COUNT: "exited before N run(s) reached the log … they were NOT
+// recorded, so the history is INCOMPLETE." That sentence is read by the same kind of reader as the
+// empty log it replaced, and it is believed for the same reason — it is specific, it names the file,
+// it sounds like the tool knows. So it has to be a fact, not a guess, in both directions:
+//   · it must fire when a record really was dropped (silence there is the original bug), and
+//   · it must NOT fire when the row is on disk (a specific false number is worse than the vague
+//     nothing it replaced — it sends you looking for a run that IS in the history).
+//
+// The second half is not hypothetical. `_pending` used to be drained only at the very end of the
+// chain, two microtask hops AFTER the INSERT had already returned — so a caller that exited in
+// exactly that window got told a written run was lost. Nothing exotic reaches it: `await run(…)`,
+// a fixed number of awaits, `process.exit(0)`. Measured on this Node, +12 and +13 microtasks landed
+// squarely inside it.
+//
+// The boundary moves with the Node version, so do not assert where it is — assert that NO exit
+// shape can make the guard disagree with the database. Docker-free (the same shim as above): this
+// is a promise-timing fault, and it must stay watched on a machine with no daemon.
+test('the exit guard never calls a WRITTEN run lost — and never loses one in silence', async (t) => {
+  const { mkdtempSync, rmSync, writeFileSync: wf, chmodSync, existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join: pjoin, resolve } = await import('node:path');
+  const { DatabaseSync } = await import('node:sqlite');
+
+  const dir = mkdtempSync(pjoin(tmpdir(), 'anvil-guardtiming-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const shim = pjoin(dir, 'docker');
+  wf(shim, FAKE_DOCKER);
+  chmodSync(shim, 0o755);
+
+  // An ordinary embedder: take the result, then end the process. The loop is the only unusual part,
+  // and all it does is step the exit one microtask further along, one run at a time.
+  const runPath = resolve(import.meta.dirname, '..', 'src', 'run.js');
+  const child = pjoin(dir, 'impatient.mjs');
+  wf(child, `import { run } from ${JSON.stringify(runPath)};\n`
+    + `await run({ image: 'alpine:3.20', cmd: 'echo x' });\n`
+    + `for (let i = 0; i < +process.env.MICRO; i++) await null;\n`
+    + `process.exit(0);\n`);
+
+  const lies = [];
+  for (let micro = 0; micro <= 15; micro++) {
+    const db = pjoin(dir, `m${micro}.db`);
+    const r = spawnSync(process.execPath, [child], {
+      encoding: 'utf8', timeout: 60_000,
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ANVIL_DB: db, MICRO: `${micro}` },
+    });
+    assert.equal(r.status, 0, `the child itself must exit cleanly at +${micro} microtasks: ${r.stderr}`);
+    const claimedLost = /were NOT recorded/.test(`${r.stderr}`);
+    const rows = existsSync(db)
+      ? (() => { const d = new DatabaseSync(db); const n = d.prepare('SELECT count(*) AS c FROM runs').get().c; d.close(); return n; })()
+      : 0;
+    if (claimedLost && rows > 0) lies.push(`+${micro} microtasks: the guard says the run was NOT recorded — and ${rows} row(s) are in the db`);
+    if (!claimedLost && rows === 0) lies.push(`+${micro} microtasks: the run is in no db and NOTHING said so — a silent loss`);
+  }
+  assert.deepEqual(lies, [], 'the exit guard disagreed with the database:\n  ' + lies.join('\n  '));
+});
