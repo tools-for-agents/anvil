@@ -223,9 +223,6 @@ export function safeJoin(base, rel) {
 // noLog: skip the opt-in auto-log (the caller will log it itself, e.g. to capture the new id).
 export function run(opts = {}) {
   return new Promise((resolveP) => {
-    const docker = dockerStatus();
-    if (!docker.ok) return resolveP({ ok: false, docker: docker.reason, error: docker.error });
-
     let { image, lang, code, cmd, files = {}, stdin = null, mount = null,
       timeout_ms = 30_000, network = 'none', mem = '512m', cpus = '1', secure = false, onData = null } = opts;
     timeout_ms = clampTimeout(timeout_ms);
@@ -243,6 +240,11 @@ export function run(opts = {}) {
     }
     if (!image) image = 'alpine:3.20';
     if (!cmd) return resolveP({ ok: false, error: 'nothing to run: provide cmd, or lang+code' });
+    // The caller's mistake first, the machine's state second. With Docker down, an unknown lang used to
+    // come back as "docker is not running" — true, and not the thing the caller got wrong; they fix
+    // Docker, rerun, and only then learn the lang never existed. Arguments are judged before the daemon.
+    const docker = dockerStatus();
+    if (!docker.ok) return resolveP({ ok: false, docker: docker.reason, error: docker.error });
 
     // materialize files into a temp work dir
     const work = mkdtempSync(join(tmpdir(), 'anvil-'));
